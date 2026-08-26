@@ -65,7 +65,7 @@ export default function Hero() {
             className="
               mt-8
               flex
-              h-14
+              h-12
               w-full
               max-w-[340px]
               items-center
@@ -81,7 +81,7 @@ export default function Hero() {
               hover:scale-[1.02]
               hover:bg-[#9B6B4E]
 
-              lg:h-16
+              lg:h-12
               lg:max-w-[420px]
               lg:text-lg
             "

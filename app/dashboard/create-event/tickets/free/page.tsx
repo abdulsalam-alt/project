@@ -4,327 +4,576 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarDays,
-  Ticket,
+  Clock,
+  MapPin,
 } from "lucide-react";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import {
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
+
+import {
+  useState,
+} from "react";
 
 import {
   getEventDraft,
   saveEventDraft,
-  type EventTicket,
 } from "@/lib/dashboard/eventDraft";
 
-export default function FreeTicketsPage() {
-  const router = useRouter();
+export default function LocationPage() {
+  const router =
+    useRouter();
 
-  const [draftId] = useState(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
+  const searchParams =
+    useSearchParams();
 
-    return new URLSearchParams(
-      window.location.search
-    ).get("draftId");
-  });
+  const draftId =
+    searchParams.get(
+      "draftId"
+    );
 
   const draft =
     draftId
-      ? getEventDraft(draftId)
+      ? getEventDraft(
+          draftId
+        )
       : null;
 
-  const [quantity, setQuantity] =
-    useState(
-      draft?.tickets[0]?.available
-        ? String(
-            draft.tickets[0].available
-          )
-        : ""
-    );
+  const [
+    location,
+    setLocation,
+  ] = useState(
+    draft?.location ??
+      ""
+  );
 
-  const [salesStart, setSalesStart] =
-    useState(
-      draft?.ticketSalesStart ?? ""
-    );
+  const [
+    venue,
+    setVenue,
+  ] = useState(
+    draft?.venue ??
+      draft?.location ??
+      ""
+  );
 
-  const [salesEnd, setSalesEnd] =
-    useState(
-      draft?.ticketSalesEnd ?? ""
-    );
+  const [
+    address,
+    setAddress,
+  ] = useState(
+    draft?.address ??
+      ""
+  );
 
-  const [errors, setErrors] = useState<{
-    quantity?: string;
-    salesStart?: string;
-    salesEnd?: string;
+  const [
+    date,
+    setDate,
+  ] = useState(
+    draft?.date ??
+      ""
+  );
+
+  const [
+    startTime,
+    setStartTime,
+  ] = useState(
+    draft?.startTime ??
+      draft?.time ??
+      ""
+  );
+
+  const [
+    endTime,
+    setEndTime,
+  ] = useState(
+    draft?.endTime ??
+      ""
+  );
+
+  const [
+    latitude,
+    setLatitude,
+  ] = useState<
+    number | undefined
+  >(
+    draft?.latitude
+  );
+
+  const [
+    longitude,
+    setLongitude,
+  ] = useState<
+    number | undefined
+  >(
+    draft?.longitude
+  );
+
+  const [
+    errors,
+    setErrors,
+  ] = useState<{
+    location?: string;
+    venue?: string;
+    address?: string;
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    general?: string;
   }>({});
 
-  const goBack = () => {
-    router.push(
-      draftId
-        ? `/dashboard/create-event/tickets?draftId=${encodeURIComponent(
-            draftId
-          )}`
-        : "/dashboard/create-event/tickets"
-    );
-  };
-
-  const handleContinue = () => {
-    const next: typeof errors =
-      {};
-
-    const parsedQuantity =
-      Number(quantity);
-
-    if (
-      !quantity ||
-      !Number.isInteger(
-        parsedQuantity
-      ) ||
-      parsedQuantity < 1
-    ) {
-      next.quantity =
-        "Enter a ticket quantity greater than 0.";
-    }
-
-    if (!salesStart) {
-      next.salesStart =
-        "Select when ticket registration starts.";
-    }
-
-    if (!salesEnd) {
-      next.salesEnd =
-        "Select when ticket registration ends.";
-    }
-
-    if (
-      salesStart &&
-      salesEnd &&
-      new Date(salesEnd) <=
-        new Date(salesStart)
-    ) {
-      next.salesEnd =
-        "Registration must end after it starts.";
-    }
-
-    setErrors(next);
-
-    if (Object.keys(next).length) {
-      return;
-    }
-
+  const saveLocation = () => {
     if (!draftId) {
-      return;
+      return null;
     }
 
-    saveEventDraft({
+    return saveEventDraft({
       id: draftId,
 
-      ticketType: "free",
+      location:
+        location.trim(),
 
-      tickets: [
-      {
-  id:
-    draft?.tickets[0]?.id ??
-    crypto.randomUUID(),
+      venue:
+        venue.trim(),
 
-  name: "Free Ticket",
+      address:
+        address.trim(),
 
-  price: 0,
+      date,
 
-  description: "Free admission",
+      time:
+        startTime,
 
-  quantity: parsedQuantity,
+      startTime,
 
-  sold:
-    draft?.tickets[0]?.sold ?? 0,
-}
-      ],
+      endTime,
 
-      ticketSalesStart:
-        salesStart,
+      latitude,
 
-      ticketSalesEnd:
-        salesEnd,
+      longitude,
 
-      payment: null,
+      currentStep:
+        "location",
 
-      currentStep: "review",
-
-      status: "draft",
+      status:
+        "draft",
     });
-
-    router.push(
-      `/dashboard/create-event/review?draftId=${encodeURIComponent(
-        draftId
-      )}`
-    );
   };
 
+  const validate =
+    () => {
+      const next:
+        typeof errors =
+        {};
+
+      if (
+        !location.trim()
+      ) {
+        next.location =
+          "Location is required.";
+      }
+
+      if (
+        !venue.trim()
+      ) {
+        next.venue =
+          "Venue is required.";
+      }
+
+      if (
+        !address.trim()
+      ) {
+        next.address =
+          "Address is required.";
+      }
+
+      if (!date) {
+        next.date =
+          "Event date is required.";
+      }
+
+      if (!startTime) {
+        next.startTime =
+          "Start time is required.";
+      }
+
+      if (!endTime) {
+        next.endTime =
+          "End time is required.";
+      }
+
+      if (
+        startTime &&
+        endTime &&
+        endTime <=
+          startTime
+      ) {
+        next.endTime =
+          "End time must be after start time.";
+      }
+
+      setErrors(
+        next
+      );
+
+      return (
+        Object.keys(
+          next
+        ).length === 0
+      );
+    };
+
+  const handleContinue =
+    () => {
+      if (!draftId) {
+        setErrors({
+          general:
+            "Event draft could not be found.",
+        });
+
+        return;
+      }
+
+      if (!validate()) {
+        return;
+      }
+
+      const saved =
+        saveLocation();
+
+      if (!saved) {
+        setErrors({
+          general:
+            "Unable to save event location.",
+        });
+
+        return;
+      }
+
+      router.push(
+        `/dashboard/create-event/tickets?draftId=${encodeURIComponent(
+          saved.id
+        )}`
+      );
+    };
+
+  const handleBack =
+    () => {
+      if (draftId) {
+        router.push(
+          `/dashboard/create-event?draftId=${encodeURIComponent(
+            draftId
+          )}`
+        );
+      } else {
+        router.push(
+          "/dashboard/create-event"
+        );
+      }
+    };
+
   return (
-    <main className="min-h-screen bg-[#FAFAFA] px-4 py-8 sm:px-6 md:px-10">
-      <div className="mx-auto max-w-4xl">
+    <main className="min-h-screen bg-[#FAFAFA] px-4 py-8 sm:px-6 lg:px-10">
+      <div className="mx-auto max-w-5xl">
 
         <div className="flex items-start gap-3">
-
           <button
             type="button"
-            onClick={goBack}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border bg-white text-[#432616]"
+            onClick={handleBack}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-[#432616]"
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft
+              size={20}
+            />
           </button>
 
           <div>
-            <h1 className="text-2xl font-semibold text-[#241507] sm:text-3xl">
-              Free Event
+            <h1 className="text-2xl font-bold text-[#241507] sm:text-3xl">
+              Location & Time
             </h1>
 
             <p className="mt-2 text-gray-500">
-              Set how many free tickets you
-              want to make available.
+              Set where and when your event will take place.
             </p>
           </div>
-
         </div>
 
-        <section className="mt-8 rounded-2xl border bg-white p-5 sm:p-8">
+        <section className="mt-8 rounded-2xl border border-gray-200 bg-white p-5 sm:p-8">
 
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-50 text-green-700">
-            <Ticket size={24} />
-          </div>
+          <div className="grid gap-5 md:grid-cols-2">
 
-          <h2 className="mt-5 text-xl font-semibold">
-            Free ticket settings
-          </h2>
+            {/* LOCATION */}
 
-          {/* QUANTITY */}
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-[#241507]">
+                Location
+              </label>
 
-          <div className="mt-6">
+              <div className="relative">
+                <MapPin
+                  size={18}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+                />
 
-            <label className="mb-2 block text-sm font-medium">
-              Number of tickets
-            </label>
+                <input
+                  value={location}
+                  onChange={(event) => {
+                    setLocation(
+                      event.target.value
+                    );
 
-            <input
-              type="number"
-              min="1"
-              value={quantity}
-              onChange={(e) =>
-                setQuantity(e.target.value)
-              }
-              placeholder="100"
-              className={`h-14 w-full rounded-xl border px-4 outline-none ${
-                errors.quantity
-                  ? "border-red-400"
-                  : "border-gray-300 focus:border-[#432616]"
-              }`}
-            />
-
-            {errors.quantity && (
-              <p className="mt-2 text-sm text-red-600">
-                {errors.quantity}
-              </p>
-            )}
-
-          </div>
-
-          {/* SALES PERIOD */}
-
-          <div className="mt-8 border-t pt-8">
-
-            <h3 className="font-semibold">
-              Registration period
-            </h3>
-
-            <div className="mt-5 grid gap-5 md:grid-cols-2">
-
-              <div>
-
-                <label className="mb-2 block text-sm font-medium">
-                  Registration starts
-                </label>
-
-                <div className="relative">
-
-                  <CalendarDays
-                    size={18}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
-                  />
-
-                  <input
-                    type="datetime-local"
-                    value={salesStart}
-                    onChange={(e) =>
-                      setSalesStart(
-                        e.target.value
-                      )
-                    }
-                    className={`h-14 w-full rounded-xl border pl-11 pr-4 outline-none ${
-                      errors.salesStart
-                        ? "border-red-400"
-                        : "border-gray-300 focus:border-[#432616]"
-                    }`}
-                  />
-
-                </div>
-
-                {errors.salesStart && (
-                  <p className="mt-2 text-sm text-red-600">
-                    {errors.salesStart}
-                  </p>
-                )}
-
+                    setErrors(
+                      (current) => ({
+                        ...current,
+                        location:
+                          undefined,
+                      })
+                    );
+                  }}
+                  placeholder="Lagos"
+                  className={`h-14 w-full rounded-xl border bg-white pl-11 pr-4 outline-none ${
+                    errors.location
+                      ? "border-red-400"
+                      : "border-gray-300 focus:border-[#432616]"
+                  }`}
+                />
               </div>
 
-              <div>
+              {errors.location && (
+                <p className="mt-2 text-sm text-red-600">
+                  {
+                    errors.location
+                  }
+                </p>
+              )}
+            </div>
 
-                <label className="mb-2 block text-sm font-medium">
-                  Registration ends
-                </label>
+            {/* VENUE */}
 
-                <div className="relative">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-[#241507]">
+                Venue
+              </label>
 
-                  <CalendarDays
-                    size={18}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
-                  />
+              <input
+                value={venue}
+                onChange={(event) => {
+                  setVenue(
+                    event.target.value
+                  );
 
-                  <input
-                    type="datetime-local"
-                    value={salesEnd}
-                    onChange={(e) =>
-                      setSalesEnd(
-                        e.target.value
-                      )
-                    }
-                    className={`h-14 w-full rounded-xl border pl-11 pr-4 outline-none ${
-                      errors.salesEnd
-                        ? "border-red-400"
-                        : "border-gray-300 focus:border-[#432616]"
-                    }`}
-                  />
+                  setErrors(
+                    (current) => ({
+                      ...current,
+                      venue:
+                        undefined,
+                    })
+                  );
+                }}
+                placeholder="Landmark Beach"
+                className={`h-14 w-full rounded-xl border px-4 outline-none ${
+                  errors.venue
+                    ? "border-red-400"
+                    : "border-gray-300 focus:border-[#432616]"
+                }`}
+              />
 
-                </div>
+              {errors.venue && (
+                <p className="mt-2 text-sm text-red-600">
+                  {errors.venue}
+                </p>
+              )}
+            </div>
 
-                {errors.salesEnd && (
-                  <p className="mt-2 text-sm text-red-600">
-                    {errors.salesEnd}
-                  </p>
-                )}
+            {/* ADDRESS */}
 
+            <div className="md:col-span-2">
+              <label className="mb-2 block text-sm font-semibold text-[#241507]">
+                Detailed address
+              </label>
+
+              <input
+                value={address}
+                onChange={(event) => {
+                  setAddress(
+                    event.target.value
+                  );
+
+                  setErrors(
+                    (current) => ({
+                      ...current,
+                      address:
+                        undefined,
+                    })
+                  );
+                }}
+                placeholder="Victoria Island, Lagos"
+                className={`h-14 w-full rounded-xl border px-4 outline-none ${
+                  errors.address
+                    ? "border-red-400"
+                    : "border-gray-300 focus:border-[#432616]"
+                }`}
+              />
+
+              {errors.address && (
+                <p className="mt-2 text-sm text-red-600">
+                  {errors.address}
+                </p>
+              )}
+            </div>
+
+            {/* DATE */}
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-[#241507]">
+                Event date
+              </label>
+
+              <div className="relative">
+                <CalendarDays
+                  size={18}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(event) => {
+                    setDate(
+                      event.target.value
+                    );
+
+                    setErrors(
+                      (current) => ({
+                        ...current,
+                        date:
+                          undefined,
+                      })
+                    );
+                  }}
+                  className={`h-14 w-full rounded-xl border bg-white pl-11 pr-4 outline-none ${
+                    errors.date
+                      ? "border-red-400"
+                      : "border-gray-300 focus:border-[#432616]"
+                  }`}
+                />
               </div>
 
+              {errors.date && (
+                <p className="mt-2 text-sm text-red-600">
+                  {errors.date}
+                </p>
+              )}
+            </div>
+
+            {/* START TIME */}
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-[#241507]">
+                Start time
+              </label>
+
+              <div className="relative">
+                <Clock
+                  size={18}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(event) => {
+                    setStartTime(
+                      event.target.value
+                    );
+
+                    setErrors(
+                      (current) => ({
+                        ...current,
+                        startTime:
+                          undefined,
+                      })
+                    );
+                  }}
+                  className={`h-14 w-full rounded-xl border bg-white pl-11 pr-4 outline-none ${
+                    errors.startTime
+                      ? "border-red-400"
+                      : "border-gray-300 focus:border-[#432616]"
+                  }`}
+                />
+              </div>
+
+              {errors.startTime && (
+                <p className="mt-2 text-sm text-red-600">
+                  {
+                    errors.startTime
+                  }
+                </p>
+              )}
+            </div>
+
+            {/* END TIME */}
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-[#241507]">
+                End time
+              </label>
+
+              <div className="relative">
+                <Clock
+                  size={18}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(event) => {
+                    setEndTime(
+                      event.target.value
+                    );
+
+                    setErrors(
+                      (current) => ({
+                        ...current,
+                        endTime:
+                          undefined,
+                      })
+                    );
+                  }}
+                  className={`h-14 w-full rounded-xl border bg-white pl-11 pr-4 outline-none ${
+                    errors.endTime
+                      ? "border-red-400"
+                      : "border-gray-300 focus:border-[#432616]"
+                  }`}
+                />
+              </div>
+
+              {errors.endTime && (
+                <p className="mt-2 text-sm text-red-600">
+                  {
+                    errors.endTime
+                  }
+                </p>
+              )}
             </div>
 
           </div>
 
-          <div className="mt-8 flex flex-col-reverse gap-3 border-t pt-6 sm:flex-row sm:justify-end">
+          {errors.general && (
+            <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-sm font-medium text-red-600">
+                {errors.general}
+              </p>
+            </div>
+          )}
+
+          <div className="mt-8 flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:justify-between">
 
             <button
               type="button"
-              onClick={goBack}
-              className="h-12 rounded-xl border px-6 font-medium"
+              onClick={handleBack}
+              className="flex h-12 items-center justify-center rounded-xl border border-gray-300 bg-white px-6 font-medium text-gray-700"
             >
               Back
             </button>
@@ -335,11 +584,12 @@ export default function FreeTicketsPage() {
               className="flex h-12 items-center justify-center gap-2 rounded-xl bg-[#432616] px-7 font-semibold text-white"
             >
               Continue
-              <ArrowRight size={18} />
+              <ArrowRight
+                size={18}
+              />
             </button>
 
           </div>
-
         </section>
       </div>
     </main>

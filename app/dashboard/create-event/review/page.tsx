@@ -22,11 +22,9 @@ import {
 export default function ReviewEventPage() {
   const router = useRouter();
 
-  const searchParams =
-    useSearchParams();
+  const searchParams = useSearchParams();
 
-  const draftId =
-    searchParams.get("draftId");
+  const draftId = searchParams.get("draftId");
 
   const draft = draftId
     ? getEventDraft(draftId)
@@ -38,6 +36,10 @@ export default function ReviewEventPage() {
   const [error, setError] =
     useState("");
 
+  /* =========================================================
+     BACK TO TICKETS
+  ========================================================= */
+
   const goBack = () => {
     if (!draft) {
       router.push(
@@ -47,26 +49,22 @@ export default function ReviewEventPage() {
       return;
     }
 
-    if (
-      draft.ticketType === "paid"
-    ) {
-      router.push(
-        `/dashboard/create-event/payment?draftId=${encodeURIComponent(
-          draft.id
-        )}`
-      );
-
-      return;
-    }
-
     router.push(
-      `/dashboard/create-event/tickets/free?draftId=${encodeURIComponent(
+      `/dashboard/create-event/tickets?draftId=${encodeURIComponent(
         draft.id
       )}`
     );
   };
 
+  /* =========================================================
+     SUBMIT EVENT
+  ========================================================= */
+
   const submitEvent = () => {
+    if (submitting) {
+      return;
+    }
+
     if (!draftId) {
       setError(
         "Event draft could not be found."
@@ -88,56 +86,61 @@ export default function ReviewEventPage() {
         );
       }
 
-      if (
-        !currentDraft.ticketType
-      ) {
+      if (!currentDraft.ticketType) {
         throw new Error(
           "Please select a ticket type."
         );
       }
 
       if (
-        currentDraft.tickets.length ===
-        0
+        !currentDraft.tickets ||
+        currentDraft.tickets.length === 0
       ) {
         throw new Error(
           "Please add at least one ticket."
         );
       }
 
-      /*
-      |--------------------------------------------------------------------------
-      | PAID EVENTS
-      |--------------------------------------------------------------------------
-      | Payment information is handled through
-      | the organizer Account module.
-      |
-      | We do NOT publish here.
-      */
+      /* =====================================================
+         VALIDATE PAID TICKETS
+      ===================================================== */
 
       if (
-        currentDraft.ticketType ===
-          "paid"
+        currentDraft.ticketType === "paid" ||
+        currentDraft.ticketType === "mixed"
       ) {
+        const paidTickets =
+          currentDraft.tickets.filter(
+            (ticket) =>
+              ticket.price > 0
+          );
+
+        if (
+          paidTickets.length === 0
+        ) {
+          throw new Error(
+            "Please add at least one paid ticket."
+          );
+        }
+
         const hasInvalidTicket =
-          currentDraft.tickets.some(
+          paidTickets.some(
             (ticket) =>
               ticket.price <= 0 ||
-              ticket.quantity < 1
+              ticket.quantity < 1 ||
+              !ticket.name.trim()
           );
 
         if (hasInvalidTicket) {
           throw new Error(
-            "Please make sure all paid tickets have a valid price and quantity."
+            "Please make sure all paid tickets have a valid name, price and quantity."
           );
         }
       }
 
-      /*
-      |--------------------------------------------------------------------------
-      | SUBMIT FOR ADMIN REVIEW
-      |--------------------------------------------------------------------------
-      */
+      /* =====================================================
+         SUBMIT FOR ADMIN REVIEW
+      ===================================================== */
 
       const submitted =
         submitEventForReview(
@@ -146,38 +149,61 @@ export default function ReviewEventPage() {
 
       if (!submitted) {
         throw new Error(
-          "Unable to submit event."
+          "Unable to submit event for review."
         );
       }
 
       /*
-      |--------------------------------------------------------------------------
-      | ADMIN DASHBOARD
-      |--------------------------------------------------------------------------
-      */
+       * IMPORTANT:
+       *
+       * Do NOT send the organizer to:
+       *
+       * /dashboard/admin
+       *
+       * The event has only been submitted
+       * for review. The organizer should
+       * remain in their normal dashboard.
+       */
 
       router.push(
-        "/dashboard/admin"
+        `/dashboard/events?submitted=${encodeURIComponent(
+          draftId
+        )}`
       );
     } catch (err) {
+      console.error(
+        "TEEKET: Failed to submit event.",
+        err
+      );
+
       setError(
         err instanceof Error
           ? err.message
-          : "Unable to submit event."
+          : "Unable to submit event for review."
       );
 
       setSubmitting(false);
     }
   };
 
+  /* =========================================================
+     NO DRAFT
+  ========================================================= */
+
   if (!draft) {
     return (
       <main className="min-h-screen bg-[#FAFAFA] px-4 py-8">
-        <div className="mx-auto max-w-3xl rounded-2xl border bg-white p-6 sm:p-8">
-          <h1 className="text-xl font-semibold text-red-600">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-red-200 bg-white p-6 sm:p-8">
+          <h1 className="text-xl font-semibold text-red-700">
             Event draft could not be
             found.
           </h1>
+
+          <p className="mt-2 text-sm leading-6 text-gray-500">
+            The event draft may have been
+            deleted or the link may be
+            invalid.
+          </p>
 
           <button
             type="button"
@@ -186,7 +212,7 @@ export default function ReviewEventPage() {
                 "/dashboard/create-event"
               )
             }
-            className="mt-6 rounded-xl bg-[#432616] px-5 py-3 font-semibold text-white"
+            className="mt-6 rounded-xl bg-[#432616] px-5 py-3 font-semibold text-white transition hover:opacity-90"
           >
             Back to Create Event
           </button>
@@ -195,23 +221,28 @@ export default function ReviewEventPage() {
     );
   }
 
+  /* =========================================================
+     PAGE
+  ========================================================= */
+
   return (
     <main className="min-h-screen bg-[#FAFAFA] px-4 py-8 sm:px-6 md:px-10">
       <div className="mx-auto max-w-4xl">
 
-        {/* HEADER */}
+        {/* ===================================================
+            HEADER
+        =================================================== */}
 
         <div className="flex items-start gap-3">
 
           <button
             type="button"
             onClick={goBack}
-            aria-label="Go back"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-[#432616]"
+            disabled={submitting}
+            aria-label="Go back to tickets"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-[#432616] transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <ArrowLeft
-              size={20}
-            />
+            <ArrowLeft size={20} />
           </button>
 
           <div>
@@ -228,9 +259,13 @@ export default function ReviewEventPage() {
 
         </div>
 
-        {/* EVENT */}
+        {/* ===================================================
+            EVENT CARD
+        =================================================== */}
 
         <section className="mt-8 overflow-hidden rounded-2xl border border-gray-200 bg-white">
+
+          {/* EVENT IMAGE */}
 
           {draft.image && (
             <img
@@ -242,48 +277,61 @@ export default function ReviewEventPage() {
 
           <div className="p-5 sm:p-8">
 
+            {/* TITLE */}
+
             <h2 className="text-2xl font-semibold text-[#241507]">
               {draft.title}
             </h2>
 
-            <p className="mt-3 leading-7 text-gray-600">
-              {draft.description}
-            </p>
+            {/* DESCRIPTION */}
 
-            {/* LOCATION + TICKET */}
+            {draft.description && (
+              <p className="mt-3 leading-7 text-gray-600">
+                {draft.description}
+              </p>
+            )}
+
+            {/* =================================================
+                LOCATION + TICKET TYPE
+            ================================================= */}
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
 
+              {/* LOCATION */}
+
               <div className="rounded-xl bg-gray-50 p-4">
 
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <MapPin
-                    size={17}
-                  />
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#241507]">
+                  <MapPin size={17} />
+
                   Location
                 </div>
 
-                <p className="mt-2 text-sm text-gray-600">
+                <p className="mt-2 text-sm text-gray-700">
                   {draft.venue ||
-                    draft.location}
+                    draft.location ||
+                    "Location not specified"}
                 </p>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  {draft.address}
-                </p>
+                {draft.address && (
+                  <p className="mt-1 text-sm text-gray-500">
+                    {draft.address}
+                  </p>
+                )}
 
               </div>
 
+              {/* TICKET TYPE */}
+
               <div className="rounded-xl bg-gray-50 p-4">
 
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <Ticket
-                    size={17}
-                  />
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#241507]">
+                  <Ticket size={17} />
+
                   Ticket Type
                 </div>
 
-                <p className="mt-2 text-sm capitalize text-gray-600">
+                <p className="mt-2 text-sm capitalize text-gray-700">
                   {draft.ticketType}
                 </p>
 
@@ -291,7 +339,9 @@ export default function ReviewEventPage() {
 
             </div>
 
-            {/* TICKETS */}
+            {/* =================================================
+                TICKETS
+            ================================================= */}
 
             <div className="mt-7">
 
@@ -305,25 +355,40 @@ export default function ReviewEventPage() {
                   (ticket) => (
                     <div
                       key={ticket.id}
-                      className="flex flex-col gap-2 rounded-xl border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between"
+                      className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between"
                     >
 
-                      <div>
-                        <p className="font-medium">
-                          {ticket.name}
+                      <div className="min-w-0">
+
+                        <p className="font-medium text-[#241507]">
+                          {ticket.name ||
+                            "General Admission"}
                         </p>
 
-                        <p className="text-sm text-gray-500">
-                          {ticket.quantity}{" "}
-                          available
+                        <p className="mt-1 text-sm text-gray-500">
+                          {ticket.quantity ===
+                          -1
+                            ? "Unlimited availability"
+                            : `${ticket.quantity.toLocaleString()} available`}
                         </p>
+
+                        {ticket.description && (
+                          <p className="mt-1 text-xs text-gray-400">
+                            {
+                              ticket.description
+                            }
+                          </p>
+                        )}
+
                       </div>
 
-                      <p className="font-semibold">
+                      <p className="shrink-0 font-semibold text-[#241507]">
                         {ticket.price ===
                         0
                           ? "Free"
-                          : `₦${ticket.price.toLocaleString()}`}
+                          : `₦${Number(
+                              ticket.price
+                            ).toLocaleString()}`}
                       </p>
 
                     </div>
@@ -334,54 +399,60 @@ export default function ReviewEventPage() {
 
             </div>
 
-            {/* NOTICE */}
+            {/* =================================================
+                ADMIN REVIEW NOTICE
+            ================================================= */}
 
             <div className="mt-7 rounded-2xl border border-amber-200 bg-amber-50 p-4">
 
               <p className="text-sm leading-6 text-amber-800">
-                Your event will not be published
-                immediately. After submission, it
-                will be sent to the TEEKET admin team
-                for review and approval.
+                Your event will not be
+                published immediately. After
+                submission, it will be sent to
+                the TEEKET admin team for review
+                and approval. You can track its
+                status from your Events dashboard.
               </p>
 
             </div>
 
-            {/* ERROR */}
+            {/* =================================================
+                ERROR
+            ================================================= */}
 
             {error && (
-              <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
-                <p className="text-sm font-medium text-red-600">
+              <div
+                role="alert"
+                className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4"
+              >
+                <p className="text-sm font-medium leading-6 text-red-600">
                   {error}
                 </p>
               </div>
             )}
 
-            {/* BUTTONS */}
+            {/* =================================================
+                ACTIONS
+            ================================================= */}
 
             <div className="mt-8 flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:justify-end">
 
               <button
                 type="button"
                 onClick={goBack}
-                className="h-12 rounded-xl border border-gray-300 bg-white px-6 font-medium"
+                disabled={submitting}
+                className="h-12 rounded-xl border border-gray-300 bg-white px-6 font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Back
               </button>
 
               <button
                 type="button"
-                onClick={
-                  submitEvent
-                }
-                disabled={
-                  submitting
-                }
-                className="flex h-12 items-center justify-center gap-2 rounded-xl bg-[#432616] px-7 font-semibold text-white disabled:opacity-50"
+                onClick={submitEvent}
+                disabled={submitting}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#432616] px-7 font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <CheckCircle2
-                  size={18}
-                />
+                <CheckCircle2 size={18} />
 
                 {submitting
                   ? "Submitting..."
@@ -391,7 +462,6 @@ export default function ReviewEventPage() {
             </div>
 
           </div>
-
         </section>
       </div>
     </main>

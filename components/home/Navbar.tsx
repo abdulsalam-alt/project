@@ -35,13 +35,13 @@ export default function Navbar() {
           {/* Desktop Nav */}
           <nav className="hidden items-center gap-14 lg:flex">
             <Link
-              href="/event"
+              href="/discover"
               className="text-sm text-white transition hover:text-[#7C3AED]"
             >
               Discover
             </Link>
             <Link
-              href="/create-event"
+              href="/login"
               className="text-sm text-white transition hover:text-[#7C3AED]"
             >
               Create event

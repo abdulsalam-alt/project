@@ -13,17 +13,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import {
+  DraftTicket,
   getEventDraft,
   saveEventDraft,
   type EventTicket,
 } from "@/lib/dashboard/eventDraft";
 
-function createNewTicket(): EventTicket {
+function createNewTicket(): DraftTicket {
   return {
     id: crypto.randomUUID(),
     name: "",
     price: 0,
     quantity: 0,
+    available: 0,
     sold: 0,
     description: "",
   };
@@ -43,7 +45,7 @@ export default function PaidTicketsPage() {
     return getEventDraft(draftId);
   }, [draftId]);
 
-  const [tickets, setTickets] = useState<EventTicket[]>(() => {
+  const [tickets, setTickets] = useState<DraftTicket[]>(() => {
     if (draft?.tickets && draft.tickets.length > 0) {
       return draft.tickets;
     }
@@ -350,7 +352,7 @@ export default function PaidTicketsPage() {
                               )
                         )
                       }
-                      placeholder="10000"
+                      placeholder="PRICE (₦)"
                       className="h-14 w-full rounded-xl border border-gray-200 bg-white px-4 outline-none transition focus:border-[#432616]"
                     />
                   </div>
@@ -385,7 +387,7 @@ export default function PaidTicketsPage() {
                               )
                         )
                       }
-                      placeholder="100"
+                      placeholder="QUANTITY"
                       className="h-14 w-full rounded-xl border border-gray-200 bg-white px-4 outline-none transition focus:border-[#432616]"
                     />
                   </div>
@@ -411,7 +413,7 @@ export default function PaidTicketsPage() {
                           event.target.value
                         )
                       }
-                      placeholder="General admission"
+                      placeholder="TICKET DESCRIPTION"
                       className="h-14 w-full rounded-xl border border-gray-200 bg-white px-4 outline-none transition focus:border-[#432616]"
                     />
                   </div>

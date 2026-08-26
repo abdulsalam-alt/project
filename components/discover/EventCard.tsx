@@ -1,139 +1,299 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
-import { CalendarDays, Clock3, MapPin } from "lucide-react";
 
-import { Event } from "@/lib/data/event";
+import {
+  CalendarDays,
+  Clock3,
+  MapPin,
+} from "lucide-react";
+
+import type { Event } from "@/lib/data/event";
 
 interface EventCardProps {
   event: Event;
 }
 
-export default function EventCard({ event }: EventCardProps) {
-  return (
-    <Link
-      href={`/event/${event.slug}`}
-      className="group block overflow-hidden rounded-[28px] bg-white transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
-    >
-      {/* Desktop */}
-      <div className="hidden md:flex">
-        {/* Image */}
+/* =========================================================
+   DATE
+========================================================= */
 
-        <div className="relative h-[220px] w-[320px] shrink-0 overflow-hidden">
-          <Image
-            src={event.image}
-            alt={event.title}
-            fill
-            className="object-cover transition duration-500 group-hover:scale-105"
+function formatDate(
+  date?: string
+): string {
+  if (!date || !date.trim()) {
+    return "Date not set";
+  }
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return parsed.toLocaleDateString(
+    "en-NG",
+    {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }
+  );
+}
+
+/* =========================================================
+   PRICE
+========================================================= */
+
+function formatPrice(
+  price: number
+): string {
+  const numericPrice =
+    Number(price) || 0;
+
+  if (numericPrice <= 0) {
+    return "Free";
+  }
+
+  return `₦${numericPrice.toLocaleString(
+    "en-NG"
+  )}`;
+}
+
+/* =========================================================
+   CATEGORY
+========================================================= */
+
+function formatCategory(
+  category?: string
+): string {
+  if (!category) {
+    return "Community";
+  }
+
+  return category
+    .split("-")
+    .map(
+      (word) =>
+        word.charAt(0).toUpperCase() +
+        word.slice(1)
+    )
+    .join(" ");
+}
+
+/* =========================================================
+   PLACEHOLDER
+========================================================= */
+
+function ImagePlaceholder() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[#F5F3F1]">
+      <div className="text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#432616]/10">
+          <CalendarDays
+            size={26}
+            className="text-[#432616]"
           />
         </div>
 
-        {/* Content */}
+        <p className="mt-3 text-sm font-medium text-gray-500">
+          No image
+        </p>
+      </div>
+    </div>
+  );
+}
 
-        <div className="flex flex-1 flex-col justify-between p-8">
-          <div>
-            <span className="inline-flex rounded-full bg-[#F7EFE8] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#8B6045]">
-              {event.category.replace("-", " ")}
-            </span>
+/* =========================================================
+   EVENT CARD
+========================================================= */
 
-            <h3 className="mt-4 text-3xl font-bold text-[#241507]">
-              {event.title}
+export default function EventCard({
+  event,
+}: EventCardProps) {
+  /*
+   * Never pass an empty string to Next/Image.
+   */
+  const image =
+    typeof event.image === "string" &&
+    event.image.trim().length > 0
+      ? event.image
+      : null;
+
+  /*
+   * Prefer slug.
+   *
+   * If slug is missing, use ID.
+   *
+   * If both are missing, don't create
+   * a broken event URL.
+   */
+  const eventIdentifier =
+    typeof event.slug === "string" &&
+    event.slug.trim().length > 0
+      ? event.slug.trim()
+      : typeof event.id === "string" &&
+          event.id.trim().length > 0
+        ? event.id.trim()
+        : null;
+
+  const firstTicket =
+    Array.isArray(event.tickets) &&
+    event.tickets.length > 0
+      ? event.tickets[0]
+      : null;
+
+  const price =
+    Number(firstTicket?.price) || 0;
+
+  const title =
+    event.title?.trim() ||
+    "Untitled Event";
+
+  return (
+    <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+      {/* =================================================
+          DESKTOP IMAGE
+      ================================================= */}
+
+      <div className="hidden md:block">
+        <div className="relative h-[220px] w-full overflow-hidden">
+          {image ? (
+            <Image
+              src={image}
+              alt={`${title} event image`}
+              fill
+              sizes="(max-width: 1024px) 50vw, 320px"
+              className="object-cover"
+            />
+          ) : (
+            <ImagePlaceholder />
+          )}
+        </div>
+      </div>
+
+      {/* =================================================
+          MOBILE IMAGE
+      ================================================= */}
+
+      <div className="md:hidden">
+        <div className="relative h-56 w-full overflow-hidden">
+          {image ? (
+            <Image
+              src={image}
+              alt={`${title} event image`}
+              fill
+              sizes="100vw"
+              className="object-cover"
+            />
+          ) : (
+            <ImagePlaceholder />
+          )}
+        </div>
+      </div>
+
+      {/* =================================================
+          CONTENT
+      ================================================= */}
+
+      <div className="p-5">
+        {/* =================================================
+            TITLE + PRICE
+        ================================================= */}
+
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-bold text-[#241507]">
+              {title}
             </h3>
 
-            <p className="mt-4 line-clamp-2 text-gray-600">
-              {event.description}
+            <p className="mt-1 text-sm text-gray-500">
+              {formatCategory(
+                event.category
+              )}
             </p>
           </div>
 
-          <div className="mt-8 flex flex-wrap gap-6 text-sm text-gray-600">
-            <div className="flex items-center gap-2">
-              <CalendarDays size={18} />
-              {event.date}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Clock3 size={18} />
-              {event.time}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <MapPin size={18} />
-              {event.location}
-            </div>
-          </div>
-        </div>
-
-        {/* Price */}
-
-        <div className="flex min-w-[170px] flex-col items-center justify-center border-l border-gray-100 p-8">
-          <p className="text-sm text-gray-500">
-            Ticket From
-          </p>
-
-          <h4 className="mt-2 text-3xl font-bold text-[#8B6045]">
-            {event.price}
-          </h4>
-        </div>
-      </div>
-
-      {/* Mobile */}
-
-      <div className="md:hidden">
-        <div className="relative h-56 w-full">
-          <Image
-            src={event.image}
-            alt={event.title}
-            fill
-            className="object-cover"
-          />
-        </div>
-
-        <div className="p-5">
-          <span className="inline-flex rounded-full bg-[#F7EFE8] px-3 py-1 text-xs font-semibold text-[#8B6045]">
-            {event.category.replace("-", " ")}
+          <span className="shrink-0 rounded-full bg-[#432616]/10 px-3 py-1 text-xs font-semibold text-[#432616]">
+            {formatPrice(price)}
           </span>
+        </div>
 
-          <h3 className="mt-3 text-2xl font-bold text-[#241507]">
-            {event.title}
-          </h3>
+        {/* =================================================
+            DETAILS
+        ================================================= */}
 
-          <p className="mt-3 line-clamp-2 text-gray-600">
-            {event.description}
-          </p>
+        <div className="mt-5 space-y-3">
+          {/* DATE */}
 
-          <div className="mt-5 space-y-3 text-sm text-gray-600">
-            <div className="flex items-center gap-2">
-              <CalendarDays size={16} />
-              {event.date}
-            </div>
+          <div className="flex items-center gap-3 text-sm text-gray-600">
+            <CalendarDays
+              size={17}
+              className="shrink-0 text-[#432616]"
+            />
 
-            <div className="flex items-center gap-2">
-              <Clock3 size={16} />
-              {event.time}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <MapPin size={16} />
-              {event.location}
-            </div>
+            <span>
+              {formatDate(event.date)}
+            </span>
           </div>
 
-          <div className="mt-6 flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500">
-                Ticket From
-              </p>
+          {/* TIME */}
 
-              <h4 className="text-2xl font-bold text-[#8B6045]">
-                {event.price}
-              </h4>
-            </div>
+          <div className="flex items-center gap-3 text-sm text-gray-600">
+            <Clock3
+              size={17}
+              className="shrink-0 text-[#432616]"
+            />
 
-            <span className="rounded-full bg-[#241507] px-5 py-2 text-sm font-semibold text-white">
-              View Event
+            <span>
+              {event.time?.trim() ||
+                event.startTime?.trim() ||
+                "Time not set"}
+            </span>
+          </div>
+
+          {/* LOCATION */}
+
+          <div className="flex items-center gap-3 text-sm text-gray-600">
+            <MapPin
+              size={17}
+              className="shrink-0 text-[#432616]"
+            />
+
+            <span className="truncate">
+              {event.location?.trim() ||
+                event.venue?.trim() ||
+                "Location not set"}
             </span>
           </div>
         </div>
+
+        {/* =================================================
+            VIEW EVENT
+        ================================================= */}
+
+        <div className="mt-6 border-t border-gray-100 pt-4">
+          {eventIdentifier ? (
+            <Link
+              href={`/events/${encodeURIComponent(
+                eventIdentifier
+              )}`}
+              className="flex h-11 w-full items-center justify-center rounded-xl border border-gray-300 font-semibold text-[#432616] transition hover:bg-[#432616] hover:text-white"
+            >
+              View Event
+            </Link>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="flex h-11 w-full cursor-not-allowed items-center justify-center rounded-xl border border-gray-200 bg-gray-50 font-semibold text-gray-400"
+            >
+              Event unavailable
+            </button>
+          )}
+        </div>
       </div>
-    </Link>
+    </article>
   );
 }

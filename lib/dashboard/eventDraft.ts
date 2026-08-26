@@ -1,76 +1,105 @@
 "use client";
 
+/* =========================================================
+   IMPORTS
+========================================================= */
+
 import type {
   Event,
   EventCategory,
+  EventOrganizer,
   EventStatus,
+  EventTicket,
 } from "@/lib/data/event";
+
+/* =========================================================
+   RE-EXPORT SHARED EVENT TYPES
+========================================================= */
 
 export type {
   EventCategory,
   EventStatus,
+  EventOrganizer,
+  EventTicket,
 };
 
 /* =========================================================
-   TICKET
+   TICKET TYPE
 ========================================================= */
 
-export interface EventTicket {
+export type TicketType =
+  | "free"
+  | "paid"
+  | "mixed";
+
+/* =========================================================
+   DRAFT TICKET
+========================================================= */
+
+export type DraftTicket = {
   id: string;
+
   name: string;
+
+  type?: "free" | "paid";
+
   price: number;
 
-  /*
-   * Main quantity field used by the Event type.
-   */
   quantity: number;
 
-  /*
-   * Optional alias used by some ticket pages.
-   * It is always kept synchronized with quantity.
-   */
-  available?: number;
+  sold: number;
 
-  sold?: number;
+  available: number;
 
-  description?: string;
-}
+  description: string;
+};
 
-/*
- * Some of your existing pages import DraftTicket.
- *
- * Keep this alias so those pages do not break.
- */
-export type DraftTicket = EventTicket;
+/* =========================================================
+   EVENT DRAFT STEP
+========================================================= */
+
+export type EventDraftStep =
+  | "details"
+  | "location"
+  | "tickets"
+  | "payment"
+  | "review";
 
 /* =========================================================
    EVENT DRAFT
 ========================================================= */
 
-export interface EventDraft {
+export type EventDraft = {
   id: string;
 
-  slug: string;
+  slug?: string;
 
   title: string;
 
   description: string;
 
+  category?: EventCategory;
+
   image?: string;
 
   organizerImage?: string;
 
-  category: EventCategory;
+  date?: string;
 
-  date: string;
-
-  time: string;
-
+  /*
+   * New time structure.
+   */
   startTime?: string;
 
   endTime?: string;
 
-  location: string;
+  /*
+   * Kept for backwards compatibility
+   * with older components.
+   */
+  time?: string;
+
+  location?: string;
 
   venue?: string;
 
@@ -80,492 +109,476 @@ export interface EventDraft {
 
   longitude?: number;
 
-  organizer: {
-    id: string;
-    name: string;
-    image?: string;
-  };
-
-  organizerId?: string;
-
-  organizerEmail?: string;
-
-  tickets: EventTicket[];
-
-  ticketType?: "free" | "paid";
-
+  /*
+   * Ticket sales period.
+   */
   ticketSalesStart?: string;
 
   ticketSalesEnd?: string;
 
+  organizer?: EventOrganizer;
+
+  tickets: DraftTicket[];
+
+  ticketType?: TicketType;
+
+  currentStep: EventDraftStep;
+
   status: EventStatus;
-
-  rejectionReason?: string;
-
-  currentStep?:
-    | "details"
-    | "location"
-    | "tickets"
-    | "payment"
-    | "review"
-    | "complete";
 
   createdAt: string;
 
   updatedAt: string;
+};
 
-  submittedAt?: string;
+/* =========================================================
+   STORAGE KEYS
+========================================================= */
 
-  publishedAt?: string;
+const STORAGE_KEY =
+  "teeket-event-drafts";
 
-  endedAt?: string;
+const ORGANIZER_EVENTS_KEY =
+  "teeket-organizer-events";
 
-  cancelledAt?: string;
+export {
+  ORGANIZER_EVENTS_KEY,
+};
+
+/* =========================================================
+   DEFAULT ORGANIZER
+========================================================= */
+
+const DEFAULT_ORGANIZER: EventOrganizer = {
+  id: "default-organizer",
+
+  name: "TEEKET Organizer",
+
+  image:
+    "/images/organizers/default.png",
+};
+
+/* =========================================================
+   LISTENERS
+========================================================= */
+
+const listeners =
+  new Set<() => void>();
+
+/* =========================================================
+   EMPTY SERVER SNAPSHOTS
+========================================================= */
+
+export const EMPTY_DRAFTS: EventDraft[] = [];
+
+export const EMPTY_EVENTS: Event[] = [];
+
+/* =========================================================
+   CACHED SNAPSHOTS
+========================================================= */
+
+let cachedDrafts: EventDraft[] =
+  EMPTY_DRAFTS;
+
+let cachedOrganizerEvents: Event[] =
+  EMPTY_EVENTS;
+
+let cachedPublicEvents: Event[] =
+  EMPTY_EVENTS;
+
+let draftsCacheInitialized =
+  false;
+
+let organizerEventsCacheInitialized =
+  false;
+
+/* =========================================================
+   STORAGE CHECK
+========================================================= */
+
+function canUseStorage(): boolean {
+  return (
+    typeof window !==
+      "undefined" &&
+    typeof window.localStorage !==
+      "undefined"
+  );
 }
 
 /* =========================================================
-   STORAGE
+   GENERATE ID
 ========================================================= */
 
-const STORAGE_KEY = "teeket:event-drafts";
-
-const CHANGE_EVENT = "teeket:event-drafts:changed";
-
-/*
- * localStorage is small.
- *
- * We deliberately keep data URLs reasonably small.
- */
-const MAX_IMAGE_LENGTH = 350_000;
-
-const MAX_TOTAL_STORAGE_LENGTH = 4_000_000;
-
-/* =========================================================
-   CACHE
-========================================================= */
-
-let cachedEvents: EventDraft[] | null = null;
-
-let cachedOrganizerEvents: EventDraft[] = [];
-
-let cachedPublishedEvents: EventDraft[] = [];
-
-let initialized = false;
-
-/*
- * IMPORTANT:
- *
- * These references must stay stable when nothing changes.
- *
- * This prevents:
- *
- * "The result of getSnapshot should be cached..."
- */
-const EMPTY_EVENTS: EventDraft[] = [];
-
-/* =========================================================
-   BROWSER
-========================================================= */
-
-function isBrowser(): boolean {
-  return typeof window !== "undefined";
-}
-
-/* =========================================================
-   ID
-========================================================= */
-
-function createId(): string {
+function generateId(): string {
   if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
+    typeof crypto !==
+      "undefined" &&
+    typeof crypto.randomUUID ===
+      "function"
   ) {
     return crypto.randomUUID();
   }
 
   return `${Date.now()}-${Math.random()
     .toString(36)
-    .slice(2)}`;
+    .slice(2, 10)}`;
 }
 
 /* =========================================================
-   TIME
+   CURRENT TIME
 ========================================================= */
 
-function currentTime(): string {
+function now(): string {
   return new Date().toISOString();
 }
 
 /* =========================================================
-   SLUG
+   CREATE SLUG
 ========================================================= */
 
-function createSlug(title: string): string {
-  const slug = title
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-
-  return slug || `event-${Date.now()}`;
-}
-
-/* =========================================================
-   IMAGE
-========================================================= */
-
-function sanitizeImage(
-  image?: string
-): string | undefined {
-  if (!image) {
-    return undefined;
-  }
-
-  /*
-   * Normal paths and URLs are fine.
-   */
-  if (!image.startsWith("data:")) {
-    return image;
-  }
-
-  /*
-   * Prevent one giant base64 image from filling storage.
-   */
-  if (image.length > MAX_IMAGE_LENGTH) {
-    return undefined;
-  }
-
-  return image;
-}
-
-/* =========================================================
-   TICKET
-========================================================= */
-
-function sanitizeTicket(
-  ticket?: Partial<EventTicket> | null
-): EventTicket {
-  const rawQuantity = Number(
-    ticket?.quantity
-  );
-
-  const rawAvailable = Number(
-    ticket?.available
-  );
-
-  let quantity = 0;
-
-  if (
-    Number.isFinite(rawQuantity) &&
-    rawQuantity >= 0
-  ) {
-    quantity = Math.floor(rawQuantity);
-  } else if (
-    Number.isFinite(rawAvailable) &&
-    rawAvailable >= 0
-  ) {
-    quantity = Math.floor(rawAvailable);
-  }
-
-  const rawSold = Number(ticket?.sold);
-
-  const sold =
-    Number.isFinite(rawSold) &&
-    rawSold >= 0
-      ? Math.floor(rawSold)
-      : 0;
-
-  return {
-    id:
-      ticket?.id ||
-      createId(),
-
-    name:
-      typeof ticket?.name === "string"
-        ? ticket.name
-        : "",
-
-    price:
-      Number.isFinite(
-        Number(ticket?.price)
+function createSlug(
+  value: string
+): string {
+  return (
+    value
+      .toLowerCase()
+      .trim()
+      .replace(
+        /[^a-z0-9]+/g,
+        "-"
       )
-        ? Number(ticket?.price)
-        : 0,
-
-    quantity,
-
-    available: quantity,
-
-    sold,
-
-    description:
-      typeof ticket?.description === "string"
-        ? ticket.description
-        : "",
-  };
-}
-
-/* =========================================================
-   TICKETS
-========================================================= */
-
-function sanitizeTickets(
-  tickets?: EventTicket[]
-): EventTicket[] {
-  if (!Array.isArray(tickets)) {
-    return [];
-  }
-
-  return tickets.map(
-    (ticket) =>
-      sanitizeTicket(ticket)
+      .replace(
+        /^-+|-+$/g,
+        ""
+      ) ||
+    `event-${Date.now()}`
   );
 }
 
 /* =========================================================
-   ORGANIZER
+   EVENT STATUS VALIDATION
 ========================================================= */
 
-function sanitizeOrganizer(
-  organizer:
-    | EventDraft["organizer"]
-    | string
-    | undefined
-    | null,
-
-  organizerId?: string,
-
-  organizerImage?: string
-): EventDraft["organizer"] {
-  /*
-   * Object organizer.
-   */
-  if (
-    organizer &&
-    typeof organizer === "object"
-  ) {
-    return {
-      id:
-        organizer.id ||
-        organizerId ||
-        "organizer",
-
-      name:
-        organizer.name ||
-        "Organizer",
-
-      image:
-        sanitizeImage(
-          organizer.image
-        ) ||
-        sanitizeImage(
-          organizerImage
-        ),
-    };
-  }
-
-  /*
-   * String organizer.
-   *
-   * This protects older drafts.
-   */
-  if (
-    typeof organizer === "string" &&
-    organizer.trim()
-  ) {
-    return {
-      id:
-        organizerId ||
-        "organizer",
-
-      name:
-        organizer.trim(),
-
-      image:
-        sanitizeImage(
-          organizerImage
-        ),
-    };
-  }
-
-  /*
-   * Missing organizer.
-   */
-  return {
-    id:
-      organizerId ||
-      "organizer",
-
-    name: "Organizer",
-
-    image:
-      sanitizeImage(
-        organizerImage
-      ),
-  };
+function isEventStatus(
+  value: unknown
+): value is EventStatus {
+  return (
+    value === "draft" ||
+    value === "pending-review" ||
+    value === "published" ||
+    value === "rejected" ||
+    value === "ended" ||
+    value === "cancelled"
+  );
 }
 
 /* =========================================================
-   SANITIZE EVENT
+   EVENT CATEGORY VALIDATION
 ========================================================= */
 
-function sanitizeEvent(
-  event: Partial<EventDraft>
-): EventDraft {
-  const timestamp =
-    currentTime();
+function isEventCategory(
+  value: unknown
+): value is EventCategory {
+  return (
+    value === "community" ||
+    value === "art-culture" ||
+    value === "sport-wellness" ||
+    value === "career-business" ||
+    value === "concerts" ||
+    value === "food-drinks" ||
+    value === "spirituality-religion" ||
+    value === "night-life"
+  );
+}
+
+/* =========================================================
+   TICKET TYPE VALIDATION
+========================================================= */
+
+function isTicketType(
+  value: unknown
+): value is TicketType {
+  return (
+    value === "free" ||
+    value === "paid" ||
+    value === "mixed"
+  );
+}
+
+/* =========================================================
+   DRAFT STEP VALIDATION
+========================================================= */
+
+function isEventDraftStep(
+  value: unknown
+): value is EventDraftStep {
+  return (
+    value === "details" ||
+    value === "location" ||
+    value === "tickets" ||
+    value === "payment" ||
+    value === "review"
+  );
+}
+
+/* =========================================================
+   NORMALIZE TICKET
+========================================================= */
+
+function normalizeTicket(
+  value: unknown
+): DraftTicket | null {
+  if (
+    typeof value !==
+      "object" ||
+    value === null
+  ) {
+    return null;
+  }
+
+  const ticket =
+    value as Partial<DraftTicket>;
 
   const id =
-    event.id ||
-    createId();
+    typeof ticket.id ===
+    "string"
+      ? ticket.id
+      : generateId();
 
-  const title =
-    typeof event.title === "string"
-      ? event.title
+  const name =
+    typeof ticket.name ===
+      "string" &&
+    ticket.name.trim()
+      ? ticket.name
+      : "General Admission";
+
+  const price =
+    typeof ticket.price ===
+      "number" &&
+    Number.isFinite(
+      ticket.price
+    )
+      ? Math.max(
+          0,
+          ticket.price
+        )
+      : 0;
+
+  const quantity =
+    typeof ticket.quantity ===
+      "number" &&
+    Number.isFinite(
+      ticket.quantity
+    )
+      ? ticket.quantity
+      : 100;
+
+  const sold =
+    typeof ticket.sold ===
+      "number" &&
+    Number.isFinite(
+      ticket.sold
+    )
+      ? Math.max(
+          0,
+          ticket.sold
+        )
+      : 0;
+
+  const available =
+    typeof ticket.available ===
+      "number" &&
+    Number.isFinite(
+      ticket.available
+    )
+      ? ticket.available
+      : quantity === -1
+      ? -1
+      : Math.max(
+          0,
+          quantity - sold
+        );
+
+  const description =
+    typeof ticket.description ===
+      "string"
+      ? ticket.description
       : "";
 
-  const organizer =
-    sanitizeOrganizer(
-      event.organizer,
-      event.organizerId,
-      event.organizerImage
-    );
+  const type =
+    ticket.type === "free"
+      ? "free"
+      : ticket.type === "paid"
+      ? "paid"
+      : price === 0
+      ? "free"
+      : "paid";
 
   return {
     id,
-
-    slug:
-      event.slug ||
-      createSlug(
-        title ||
-          "untitled-event"
-      ),
-
-    title,
-
-    description:
-      typeof event.description ===
-      "string"
-        ? event.description
-        : "",
-
-    image:
-      sanitizeImage(
-        event.image
-      ),
-
-    organizerImage:
-      sanitizeImage(
-        event.organizerImage
-      ),
-
-    category:
-      event.category ||
-      "community",
-
-    date:
-      typeof event.date ===
-      "string"
-        ? event.date
-        : "",
-
-    time:
-      typeof event.time ===
-      "string"
-        ? event.time
-        : "",
-
-    startTime:
-      event.startTime,
-
-    endTime:
-      event.endTime,
-
-    location:
-      typeof event.location ===
-      "string"
-        ? event.location
-        : "",
-
-    venue:
-      event.venue,
-
-    address:
-      event.address,
-
-    latitude:
-      typeof event.latitude ===
-      "number"
-        ? event.latitude
-        : undefined,
-
-    longitude:
-      typeof event.longitude ===
-      "number"
-        ? event.longitude
-        : undefined,
-
-    organizer,
-
-    organizerId:
-      event.organizerId ||
-      organizer.id,
-
-    organizerEmail:
-      event.organizerEmail,
-
-    tickets:
-      sanitizeTickets(
-        event.tickets
-      ),
-
-    ticketType:
-      event.ticketType,
-
-    ticketSalesStart:
-      event.ticketSalesStart,
-
-    ticketSalesEnd:
-      event.ticketSalesEnd,
-
-    status:
-      event.status ||
-      "draft",
-
-    rejectionReason:
-      event.rejectionReason,
-
-    currentStep:
-      event.currentStep,
-
-    createdAt:
-      event.createdAt ||
-      timestamp,
-
-    updatedAt:
-      timestamp,
-
-    submittedAt:
-      event.submittedAt,
-
-    publishedAt:
-      event.publishedAt,
-
-    endedAt:
-      event.endedAt,
-
-    cancelledAt:
-      event.cancelledAt,
+    name,
+    type,
+    price,
+    quantity,
+    sold,
+    available,
+    description,
   };
 }
 
 /* =========================================================
-   READ STORAGE
+   NORMALIZE DRAFT
 ========================================================= */
 
-function readStorage(): EventDraft[] {
-  if (!isBrowser()) {
+function normalizeDraft(
+  input: EventDraft
+): EventDraft {
+  const title =
+    typeof input.title ===
+    "string"
+      ? input.title
+      : "";
+
+  const description =
+    typeof input.description ===
+    "string"
+      ? input.description
+      : "";
+
+  const slug =
+    typeof input.slug ===
+      "string" &&
+    input.slug.trim()
+      ? input.slug
+      : createSlug(
+          title || input.id
+        );
+
+  return {
+    id: input.id,
+
+    slug,
+
+    title,
+
+    description,
+
+    category:
+      isEventCategory(
+        input.category
+      )
+        ? input.category
+        : undefined,
+
+    image:
+      input.image || undefined,
+
+    organizerImage:
+      input.organizerImage ||
+      undefined,
+
+    date:
+      input.date || undefined,
+
+    startTime:
+      input.startTime ||
+      undefined,
+
+    endTime:
+      input.endTime ||
+      undefined,
+
+    time:
+      input.time || undefined,
+
+    location:
+      input.location ||
+      undefined,
+
+    venue:
+      input.venue || undefined,
+
+    address:
+      input.address ||
+      undefined,
+
+    latitude:
+      typeof input.latitude ===
+      "number"
+        ? input.latitude
+        : undefined,
+
+    longitude:
+      typeof input.longitude ===
+      "number"
+        ? input.longitude
+        : undefined,
+
+    ticketSalesStart:
+      input.ticketSalesStart ||
+      undefined,
+
+    ticketSalesEnd:
+      input.ticketSalesEnd ||
+      undefined,
+
+    organizer:
+      input.organizer ??
+      DEFAULT_ORGANIZER,
+
+    tickets:
+      Array.isArray(
+        input.tickets
+      )
+        ? input.tickets
+            .map(
+              normalizeTicket
+            )
+            .filter(
+              (
+                ticket
+              ): ticket is DraftTicket =>
+                ticket !== null
+            )
+        : [],
+
+    ticketType:
+      isTicketType(
+        input.ticketType
+      )
+        ? input.ticketType
+        : undefined,
+
+    currentStep:
+      isEventDraftStep(
+        input.currentStep
+      )
+        ? input.currentStep
+        : "details",
+
+    status:
+      isEventStatus(
+        input.status
+      )
+        ? input.status
+        : "draft",
+
+    createdAt:
+      input.createdAt ||
+      now(),
+
+    updatedAt:
+      input.updatedAt ||
+      now(),
+  };
+}
+
+/* =========================================================
+   READ DRAFTS FROM STORAGE
+========================================================= */
+
+function readDraftsFromStorage(): EventDraft[] {
+  if (!canUseStorage()) {
     return [];
   }
 
@@ -582,15 +595,196 @@ function readStorage(): EventDraft[] {
     const parsed: unknown =
       JSON.parse(raw);
 
-    if (!Array.isArray(parsed)) {
+    if (
+      !Array.isArray(parsed)
+    ) {
       return [];
     }
 
-    return parsed.map((item) =>
-      sanitizeEvent(
-        item as Partial<EventDraft>
-      )
-    );
+    return parsed
+      .map((item) => {
+        if (
+          typeof item !==
+            "object" ||
+          item === null
+        ) {
+          return null;
+        }
+
+        const value =
+          item as Record<
+            string,
+            unknown
+          >;
+
+        if (
+          typeof value.id !==
+            "string" ||
+          typeof value.title !==
+            "string"
+        ) {
+          return null;
+        }
+
+        const tickets =
+          Array.isArray(
+            value.tickets
+          )
+            ? value.tickets
+            : [];
+
+        return normalizeDraft({
+          id: value.id,
+
+          slug:
+            typeof value.slug ===
+            "string"
+              ? value.slug
+              : undefined,
+
+          title:
+            value.title,
+
+          description:
+            typeof value.description ===
+            "string"
+              ? value.description
+              : "",
+
+          category:
+            isEventCategory(
+              value.category
+            )
+              ? value.category
+              : undefined,
+
+          image:
+            typeof value.image ===
+            "string"
+              ? value.image
+              : undefined,
+
+          organizerImage:
+            typeof value.organizerImage ===
+            "string"
+              ? value.organizerImage
+              : undefined,
+
+          date:
+            typeof value.date ===
+            "string"
+              ? value.date
+              : undefined,
+
+          startTime:
+            typeof value.startTime ===
+            "string"
+              ? value.startTime
+              : undefined,
+
+          endTime:
+            typeof value.endTime ===
+            "string"
+              ? value.endTime
+              : undefined,
+
+          time:
+            typeof value.time ===
+            "string"
+              ? value.time
+              : undefined,
+
+          location:
+            typeof value.location ===
+            "string"
+              ? value.location
+              : undefined,
+
+          venue:
+            typeof value.venue ===
+            "string"
+              ? value.venue
+              : undefined,
+
+          address:
+            typeof value.address ===
+            "string"
+              ? value.address
+              : undefined,
+
+          latitude:
+            typeof value.latitude ===
+            "number"
+              ? value.latitude
+              : undefined,
+
+          longitude:
+            typeof value.longitude ===
+            "number"
+              ? value.longitude
+              : undefined,
+
+          ticketSalesStart:
+            typeof value.ticketSalesStart ===
+            "string"
+              ? value.ticketSalesStart
+              : undefined,
+
+          ticketSalesEnd:
+            typeof value.ticketSalesEnd ===
+            "string"
+              ? value.ticketSalesEnd
+              : undefined,
+
+          organizer:
+            typeof value.organizer ===
+            "object" &&
+            value.organizer !== null
+              ? (value.organizer as EventOrganizer)
+              : undefined,
+
+          tickets,
+
+          ticketType:
+            isTicketType(
+              value.ticketType
+            )
+              ? value.ticketType
+              : undefined,
+
+          currentStep:
+            isEventDraftStep(
+              value.currentStep
+            )
+              ? value.currentStep
+              : "details",
+
+          status:
+            isEventStatus(
+              value.status
+            )
+              ? value.status
+              : "draft",
+
+          createdAt:
+            typeof value.createdAt ===
+            "string"
+              ? value.createdAt
+              : now(),
+
+          updatedAt:
+            typeof value.updatedAt ===
+            "string"
+              ? value.updatedAt
+              : now(),
+        });
+      })
+      .filter(
+        (
+          draft
+        ): draft is EventDraft =>
+          draft !== null
+      );
   } catch (error) {
     console.error(
       "TEEKET: Failed to read event drafts.",
@@ -602,318 +796,131 @@ function readStorage(): EventDraft[] {
 }
 
 /* =========================================================
-   SNAPSHOTS
+   REFRESH DRAFT CACHE
 ========================================================= */
 
-function rebuildSnapshots(): void {
-  const events =
-    cachedEvents || EMPTY_EVENTS;
+function refreshDraftCache(): void {
+  cachedDrafts =
+    readDraftsFromStorage();
 
-  /*
-   * Keep exact reference for organizer snapshot.
-   */
-  cachedOrganizerEvents =
-    events;
+  draftsCacheInitialized =
+    true;
+}
 
-  /*
-   * Create a new published snapshot only when
-   * the store itself changes.
-   */
-  cachedPublishedEvents =
-    events.filter(
-      (event) =>
-        event.status ===
-        "published"
+/* =========================================================
+   GET DRAFT SNAPSHOT
+========================================================= */
+
+export function getDraftSnapshot(): EventDraft[] {
+  if (
+    !draftsCacheInitialized
+  ) {
+    refreshDraftCache();
+  }
+
+  return cachedDrafts;
+}
+
+/* =========================================================
+   WRITE DRAFTS
+========================================================= */
+
+function writeDrafts(
+  drafts: EventDraft[]
+): void {
+  const normalized =
+    drafts.map(
+      normalizeDraft
     );
-}
 
-/* =========================================================
-   INITIALIZE
-========================================================= */
+  cachedDrafts =
+    normalized;
 
-function initialize(): void {
-  if (initialized) {
-    return;
-  }
-
-  cachedEvents =
-    readStorage();
-
-  initialized = true;
-
-  rebuildSnapshots();
-}
-
-/* =========================================================
-   STORAGE REDUCTION
-========================================================= */
-
-function removeLargeImages(
-  events: EventDraft[]
-): EventDraft[] {
-  return events.map(
-    (event) => ({
-      ...event,
-
-      image:
-        event.image?.startsWith(
-          "data:"
-        )
-          ? undefined
-          : event.image,
-
-      organizerImage:
-        event.organizerImage?.startsWith(
-          "data:"
-        )
-          ? undefined
-          : event.organizerImage,
-    })
-  );
-}
-
-/* =========================================================
-   WRITE STORAGE
-========================================================= */
-
-function writeStorage(
-  events: EventDraft[]
-): boolean {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  const cleanEvents =
-    events.map(sanitizeEvent);
+  draftsCacheInitialized =
+    true;
 
   /*
-   * First attempt.
+   * Rebuild organizer events BEFORE
+   * notifying subscribers.
    */
-  try {
-    const serialized =
-      JSON.stringify(
-        cleanEvents
-      );
+  refreshOrganizerEventsCache();
 
-    if (
-      serialized.length <=
-      MAX_TOTAL_STORAGE_LENGTH
-    ) {
+  if (canUseStorage()) {
+    try {
       window.localStorage.setItem(
         STORAGE_KEY,
-        serialized
-      );
-
-      return true;
-    }
-  } catch {
-    /*
-     * Continue to reduced storage.
-     */
-  }
-
-  /*
-   * Second attempt:
-   * remove base64 images.
-   */
-  try {
-    const reduced =
-      removeLargeImages(
-        cleanEvents
-      );
-
-    const serialized =
-      JSON.stringify(
-        reduced
-      );
-
-    if (
-      serialized.length <=
-      MAX_TOTAL_STORAGE_LENGTH
-    ) {
-      window.localStorage.setItem(
-        STORAGE_KEY,
-        serialized
-      );
-
-      return true;
-    }
-  } catch {
-    /*
-     * Continue.
-     */
-  }
-
-  /*
-   * Third attempt:
-   * keep the newest events that fit.
-   */
-  try {
-    const reduced =
-      removeLargeImages(
-        cleanEvents
-      );
-
-    const selected: EventDraft[] =
-      [];
-
-    /*
-     * Start from newest.
-     */
-    for (
-      let index =
-        reduced.length - 1;
-      index >= 0;
-      index--
-    ) {
-      const candidate = [
-        reduced[index],
-        ...selected,
-      ];
-
-      const serialized =
         JSON.stringify(
-          candidate
+          normalized
+        )
+      );
+    } catch (error) {
+      /*
+       * If localStorage quota has been
+       * exceeded, remove the existing
+       * draft storage and try saving again.
+       */
+      if (
+        error instanceof DOMException &&
+        (
+          error.name ===
+            "QuotaExceededError" ||
+          error.code === 22
+        )
+      ) {
+        try {
+          window.localStorage.removeItem(
+            STORAGE_KEY
+          );
+
+          window.localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify(
+              normalized
+            )
+          );
+        } catch (retryError) {
+          console.error(
+            "TEEKET: Failed to save event drafts after clearing storage.",
+            retryError
+          );
+
+          throw new Error(
+            "Unable to save event draft because browser storage is full."
+          );
+        }
+      } else {
+        console.error(
+          "TEEKET: Failed to save event drafts.",
+          error
         );
 
-      if (
-        serialized.length <=
-        MAX_TOTAL_STORAGE_LENGTH
-      ) {
-        selected.unshift(
-          reduced[index]
+        throw new Error(
+          "Unable to save event draft."
         );
-      } else {
-        break;
       }
     }
-
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(
-        selected
-      )
-    );
-
-    return true;
-  } catch (error) {
-    console.error(
-      "TEEKET: Unable to save event drafts to localStorage.",
-      error
-    );
-
-    return false;
-  }
-}
-
-/* =========================================================
-   NOTIFY
-========================================================= */
-
-function notify(): void {
-  if (!isBrowser()) {
-    return;
   }
 
-  window.dispatchEvent(
-    new Event(
-      CHANGE_EVENT
-    )
+  notifyListeners();
+}
+
+/* =========================================================
+   NOTIFY LISTENERS
+========================================================= */
+
+function notifyListeners(): void {
+  listeners.forEach(
+    (listener) => {
+      try {
+        listener();
+      } catch (error) {
+        console.error(
+          "TEEKET: Draft listener error.",
+          error
+        );
+      }
+    }
   );
-}
-
-/* =========================================================
-   UPDATE STORE
-========================================================= */
-
-function updateStore(
-  events: EventDraft[]
-): void {
-  const cleanEvents =
-    events.map(
-      sanitizeEvent
-    );
-
-  cachedEvents =
-    cleanEvents;
-
-  initialized = true;
-
-  rebuildSnapshots();
-
-  writeStorage(
-    cleanEvents
-  );
-
-  notify();
-}
-
-/* =========================================================
-   GET ALL
-========================================================= */
-
-export function getAllEventDrafts(): EventDraft[] {
-  initialize();
-
-  return (
-    cachedEvents ||
-    EMPTY_EVENTS
-  );
-}
-
-/* =========================================================
-   GET SINGLE
-========================================================= */
-
-export function getEventDraft(
-  id: string
-): EventDraft | null {
-  if (!id) {
-    return null;
-  }
-
-  return (
-    getAllEventDrafts().find(
-      (event) =>
-        event.id === id
-    ) || null
-  );
-}
-
-/* =========================================================
-   ORGANIZER EVENTS
-========================================================= */
-
-export function getOrganizerEvents(): EventDraft[] {
-  initialize();
-
-  return cachedOrganizerEvents;
-}
-
-/*
- * Keep this export because your organizer dashboard
- * imports this exact function.
- */
-export function getCurrentOrganizerEvents(): EventDraft[] {
-  return getOrganizerEvents();
-}
-
-/* =========================================================
-   SERVER SNAPSHOT
-========================================================= */
-
-export function getServerEvents(): EventDraft[] {
-  return EMPTY_EVENTS;
-}
-
-/* =========================================================
-   PUBLISHED DRAFTS
-========================================================= */
-
-export function getPublishedEventDrafts(): EventDraft[] {
-  initialize();
-
-  return cachedPublishedEvents;
 }
 
 /* =========================================================
@@ -923,166 +930,130 @@ export function getPublishedEventDrafts(): EventDraft[] {
 export function subscribeToEventDrafts(
   callback: () => void
 ): () => void {
-  if (!isBrowser()) {
-    return () => {};
-  }
-
-  const handleChange = () => {
-    initialized = false;
-
-    initialize();
-
-    callback();
-  };
-
-  window.addEventListener(
-    CHANGE_EVENT,
-    handleChange
-  );
-
-  window.addEventListener(
-    "storage",
-    handleChange
+  listeners.add(
+    callback
   );
 
   return () => {
-    window.removeEventListener(
-      CHANGE_EVENT,
-      handleChange
-    );
-
-    window.removeEventListener(
-      "storage",
-      handleChange
+    listeners.delete(
+      callback
     );
   };
 }
 
 /* =========================================================
-   SAVE EVENT DRAFT
+   CREATE INPUT
 ========================================================= */
 
-export function saveEventDraft(
-  event: Partial<EventDraft>
-): EventDraft {
-  const existing =
-    getAllEventDrafts();
-
-  /*
-   * IMPORTANT:
-   *
-   * If the event already exists, MERGE it.
-   *
-   * This prevents a page such as:
-   *
-   * Paid Tickets
-   *
-   * from accidentally deleting:
-   *
-   * title
-   * description
-   * image
-   * location
-   * organizer
-   * etc.
-   */
-  const existingEvent =
-    event.id
-      ? existing.find(
-          (item) =>
-            item.id === event.id
-        )
-      : undefined;
-
-  const merged: Partial<EventDraft> =
-    existingEvent
-      ? {
-          ...existingEvent,
-          ...event,
-
-          /*
-           * Keep nested organizer safe.
-           */
-          organizer:
-            event.organizer ??
-            existingEvent.organizer,
-
-          /*
-           * Keep tickets when a page does not
-           * send them.
-           */
-          tickets:
-            event.tickets ??
-            existingEvent.tickets,
-        }
-      : {
-          ...event,
-        };
-
-  const clean =
-    sanitizeEvent(
-      merged
-    );
-
-  const index =
-    existing.findIndex(
-      (item) =>
-        item.id === clean.id
-    );
-
-  let nextEvents: EventDraft[];
-
-  if (index === -1) {
-    nextEvents = [
-      ...existing,
-      clean,
-    ];
-  } else {
-    nextEvents = [
-      ...existing,
-    ];
-
-    nextEvents[index] =
-      clean;
-  }
-
-  updateStore(
-    nextEvents
-  );
-
-  return clean;
-}
+export type CreateEventDraftInput =
+  Partial<
+    Omit<
+      EventDraft,
+      | "id"
+      | "createdAt"
+      | "updatedAt"
+    >
+  >;
 
 /* =========================================================
    CREATE EVENT DRAFT
 ========================================================= */
 
 export function createEventDraft(
-  data?: Partial<EventDraft>
+  input: CreateEventDraftInput = {}
 ): EventDraft {
+  const timestamp =
+    now();
+
   const draft =
-    sanitizeEvent({
-      ...data,
+    normalizeDraft({
+      id: generateId(),
 
-      id:
-        data?.id ||
-        createId(),
+      slug:
+        input.slug ||
+        createSlug(
+          input.title ||
+            "Untitled Event"
+        ),
 
-      status:
-        data?.status ||
-        "draft",
+      title:
+        input.title || "",
+
+      description:
+        input.description || "",
+
+      category:
+        input.category,
+
+      image:
+        input.image,
+
+      organizerImage:
+        input.organizerImage,
+
+      date:
+        input.date,
+
+      startTime:
+        input.startTime,
+
+      endTime:
+        input.endTime,
+
+      time:
+        input.time,
+
+      location:
+        input.location,
+
+      venue:
+        input.venue,
+
+      address:
+        input.address,
+
+      latitude:
+        input.latitude,
+
+      longitude:
+        input.longitude,
+
+      ticketSalesStart:
+        input.ticketSalesStart,
+
+      ticketSalesEnd:
+        input.ticketSalesEnd,
+
+      organizer:
+        input.organizer ??
+        DEFAULT_ORGANIZER,
 
       tickets:
-        data?.tickets ||
-        [],
+        input.tickets ?? [],
+
+      ticketType:
+        input.ticketType,
+
+      currentStep:
+        input.currentStep ??
+        "details",
+
+      status:
+        input.status ??
+        "draft",
 
       createdAt:
-        data?.createdAt ||
-        currentTime(),
+        timestamp,
+
+      updatedAt:
+        timestamp,
     });
 
-  updateStore([
-    ...getAllEventDrafts(),
+  const drafts =
+    getDraftSnapshot();
+
+  writeDrafts([
+    ...drafts,
     draft,
   ]);
 
@@ -1090,332 +1061,613 @@ export function createEventDraft(
 }
 
 /* =========================================================
-   SAVE DRAFT
+   GET EVENT DRAFT
 ========================================================= */
 
-export function saveDraft(
-  event: Partial<EventDraft>
-): EventDraft {
-  return saveEventDraft({
-    ...event,
-
-    status: "draft",
-  });
-}
-
-/* =========================================================
-   SUBMIT FOR REVIEW
-========================================================= */
-
-export function submitEventForReview(
+export function getEventDraft(
   id: string
 ): EventDraft | null {
-  const event =
-    getEventDraft(id);
-
-  if (!event) {
+  if (!id) {
     return null;
   }
 
-  return saveEventDraft({
-    ...event,
-
-    status:
-      "pending-review",
-
-    submittedAt:
-      currentTime(),
-
-    rejectionReason:
-      undefined,
-  });
-}
-
-/* =========================================================
-   ADMIN APPROVE
-========================================================= */
-
-export function approveOrganizerEvent(
-  id: string
-): EventDraft | null {
-  const event =
-    getEventDraft(id);
-
-  if (!event) {
-    return null;
-  }
-
-  return saveEventDraft({
-    ...event,
-
-    status:
-      "published",
-
-    publishedAt:
-      currentTime(),
-
-    rejectionReason:
-      undefined,
-  });
-}
-
-/* =========================================================
-   ADMIN REJECT
-========================================================= */
-
-export function rejectOrganizerEvent(
-  id: string,
-  reason: string
-): EventDraft | null {
-  const event =
-    getEventDraft(id);
-
-  if (!event) {
-    return null;
-  }
-
-  return saveEventDraft({
-    ...event,
-
-    status:
-      "rejected",
-
-    rejectionReason:
-      reason.trim() ||
-      "Event was rejected by admin.",
-  });
-}
-
-/* =========================================================
-   ADMIN UNPUBLISH
-========================================================= */
-
-export function unpublishOrganizerEvent(
-  id: string
-): EventDraft | null {
-  const event =
-    getEventDraft(id);
-
-  if (!event) {
-    return null;
-  }
-
-  return saveEventDraft({
-    ...event,
-
-    status: "draft",
-
-    rejectionReason:
-      "Event has been unpublished by admin.",
-  });
-}
-
-/* =========================================================
-   END EVENT
-========================================================= */
-
-export function endOrganizerEvent(
-  id: string
-): EventDraft | null {
-  const event =
-    getEventDraft(id);
-
-  if (!event) {
-    return null;
-  }
-
-  return saveEventDraft({
-    ...event,
-
-    status: "ended",
-
-    endedAt:
-      currentTime(),
-  });
-}
-
-/* =========================================================
-   CANCEL EVENT
-========================================================= */
-
-export function cancelOrganizerEvent(
-  id: string
-): EventDraft | null {
-  const event =
-    getEventDraft(id);
-
-  if (!event) {
-    return null;
-  }
-
-  return saveEventDraft({
-    ...event,
-
-    status:
-      "cancelled",
-
-    cancelledAt:
-      currentTime(),
-  });
-}
-
-/* =========================================================
-   DELETE EVENT
-========================================================= */
-
-export function deleteOrganizerEvent(
-  id: string
-): boolean {
-  const existing =
-    getAllEventDrafts();
-
-  const next =
-    existing.filter(
-      (event) =>
-        event.id !== id
+  const draft =
+    getDraftSnapshot().find(
+      (item) =>
+        item.id === id
     );
 
-  if (
-    next.length ===
-    existing.length
-  ) {
-    return false;
-  }
-
-  updateStore(next);
-
-  return true;
+  return draft
+    ? normalizeDraft(draft)
+    : null;
 }
 
 /* =========================================================
-   CLEAR DEVELOPMENT EVENTS
+   GET ALL DRAFTS
 ========================================================= */
 
-export function clearAllEventDrafts(): void {
-  updateStore([]);
+export function getEventDrafts(): EventDraft[] {
+  return getDraftSnapshot();
 }
 
 /* =========================================================
-   CONVERT DRAFT → PUBLIC EVENT
+   SAVE EVENT INPUT
+========================================================= */
+
+export type SaveEventDraftInput =
+  Partial<
+    Omit<
+      EventDraft,
+      | "createdAt"
+      | "updatedAt"
+      | "ticketType"
+    >
+  > & {
+    id: string;
+
+    ticketType?:
+      | TicketType
+      | "";
+  };
+
+/* =========================================================
+   SAVE EVENT DRAFT
+========================================================= */
+
+export function saveEventDraft(
+  input: SaveEventDraftInput
+): EventDraft {
+  if (!input.id) {
+    throw new Error(
+      "Event draft ID is required."
+    );
+  }
+
+  const drafts =
+    getDraftSnapshot();
+
+  const index =
+    drafts.findIndex(
+      (draft) =>
+        draft.id === input.id
+    );
+
+  if (index === -1) {
+    throw new Error(
+      "Event draft could not be found."
+    );
+  }
+
+  const existing =
+    normalizeDraft(
+      drafts[index]
+    );
+
+  const nextTicketType:
+    | TicketType
+    | undefined =
+    input.ticketType === ""
+      ? undefined
+      : input.ticketType ??
+        existing.ticketType;
+
+  const {
+    ticketType: _ticketType,
+    ...restInput
+  } = input;
+
+  const updated: EventDraft =
+    normalizeDraft({
+      ...existing,
+
+      ...restInput,
+
+      id:
+        existing.id,
+
+      createdAt:
+        existing.createdAt,
+
+      updatedAt:
+        now(),
+
+      ticketType:
+        nextTicketType,
+
+      tickets:
+        input.tickets ??
+        existing.tickets,
+
+      currentStep:
+        input.currentStep ??
+        existing.currentStep,
+
+      status:
+        input.status ??
+        existing.status,
+    });
+
+  const nextDrafts =
+    [...drafts];
+
+  nextDrafts[index] =
+    updated;
+
+  writeDrafts(
+    nextDrafts
+  );
+
+  return updated;
+}
+
+/* =========================================================
+   DELETE EVENT DRAFT
+========================================================= */
+
+export function deleteEventDraft(
+  id: string
+): void {
+  if (!id) {
+    return;
+  }
+
+  const drafts =
+    getDraftSnapshot();
+
+  writeDrafts(
+    drafts.filter(
+      (draft) =>
+        draft.id !== id
+    )
+  );
+}
+
+/* =========================================================
+   CLEAR ALL DRAFTS
+========================================================= */
+
+export function clearEventDrafts(): void {
+  writeDrafts([]);
+}
+
+/* =========================================================
+   CONVERT DRAFT TICKET
+========================================================= */
+
+function convertDraftTicket(
+  ticket: DraftTicket
+): EventTicket {
+  return {
+    id: ticket.id,
+
+    name:
+      ticket.name ||
+      "General Admission",
+
+    price:
+      Math.max(
+        0,
+        Number(ticket.price) || 0
+      ),
+
+    quantity:
+      ticket.quantity,
+
+    sold:
+      Math.max(
+        0,
+        Number(ticket.sold) || 0
+      ),
+
+    description:
+      ticket.description || "",
+  };
+}
+
+/* =========================================================
+   CONVERT DRAFT TO EVENT
 ========================================================= */
 
 export function convertDraftToEvent(
   draft: EventDraft
 ): Event {
-  const organizer = {
+  const normalized =
+    normalizeDraft(
+      draft
+    );
+
+  if (!normalized.category) {
+    throw new Error(
+      "Event category is required."
+    );
+  }
+
+  if (!normalized.date) {
+    throw new Error(
+      "Event date is required."
+    );
+  }
+
+  /*
+   * Support both the new
+   * start/end time structure
+   * and the old time field.
+   */
+  const eventTime =
+    normalized.startTime ||
+    normalized.time;
+
+  if (!eventTime) {
+    throw new Error(
+      "Event start time is required."
+    );
+  }
+
+  if (!normalized.location) {
+    throw new Error(
+      "Event location is required."
+    );
+  }
+
+  if (
+    typeof normalized.latitude !==
+      "number" ||
+    typeof normalized.longitude !==
+      "number"
+  ) {
+    throw new Error(
+      "Event coordinates are required."
+    );
+  }
+
+  const slug =
+    normalized.slug ||
+    createSlug(
+      normalized.title
+    );
+
+  const event: Event = {
     id:
-      draft.organizer?.id ||
-      draft.organizerId ||
-      "organizer",
+      normalized.id,
 
-    name:
-      draft.organizer?.name ||
-      "Organizer",
+    slug,
 
-    image:
-      draft.organizer?.image ||
-      draft.organizerImage,
-  };
-
-  return {
-    id: draft.id,
-
-    slug: draft.slug,
-
-    title: draft.title,
+    title:
+      normalized.title,
 
     description:
-      draft.description,
+      normalized.description,
 
     image:
-      draft.image,
+      normalized.image,
 
     organizerImage:
-      draft.organizerImage,
+      normalized.organizerImage,
 
     category:
-      draft.category,
+      normalized.category,
 
     date:
-      draft.date,
+      normalized.date,
 
     time:
-      draft.time ||
-      draft.startTime ||
-      "",
+      eventTime,
 
     location:
-      draft.location,
+      normalized.location,
 
     venue:
-      draft.venue,
+      normalized.venue,
 
     address:
-      draft.address,
+      normalized.address,
 
     latitude:
-      draft.latitude ??
-      0,
+      normalized.latitude,
 
     longitude:
-      draft.longitude ??
-      0,
+      normalized.longitude,
 
-    organizer,
+    organizer:
+      normalized.organizer ??
+      DEFAULT_ORGANIZER,
 
     tickets:
-      draft.tickets.map(
-        (ticket) => ({
-          id:
-            ticket.id,
-
-          name:
-            ticket.name,
-
-          price:
-            ticket.price,
-
-          quantity:
-            ticket.quantity,
-
-          sold:
-            ticket.sold || 0,
-        })
+      normalized.tickets.map(
+        convertDraftTicket
       ),
 
     status:
-      draft.status,
+      normalized.status,
 
     createdAt:
-      draft.createdAt,
+      normalized.createdAt,
 
     updatedAt:
-      draft.updatedAt,
+      normalized.updatedAt,
   };
+
+  return event;
 }
 
 /* =========================================================
-   PUBLISHED EVENTS
+   BUILD ORGANIZER EVENTS
 ========================================================= */
 
-export function getPublishedEvents(): Event[] {
-  return getPublishedEventDrafts().map(
-    convertDraftToEvent
+function buildOrganizerEvents(): Event[] {
+  const drafts =
+    getDraftSnapshot();
+
+  return drafts
+    .filter(
+      (draft) =>
+        draft.status ===
+          "published" ||
+        draft.status ===
+          "pending-review" ||
+        draft.status ===
+          "ended" ||
+        draft.status ===
+          "cancelled"
+    )
+    .map((draft) => {
+      try {
+        return convertDraftToEvent(
+          draft
+        );
+      } catch {
+        return null;
+      }
+    })
+    .filter(
+      (
+        event
+      ): event is Event =>
+        event !== null
+    );
+}
+
+/* =========================================================
+   REFRESH ORGANIZER EVENTS
+========================================================= */
+
+function refreshOrganizerEventsCache(): void {
+  cachedOrganizerEvents =
+    buildOrganizerEvents();
+
+  /*
+   * IMPORTANT:
+   * Keep public events cached as well.
+   *
+   * Do NOT call .filter() inside
+   * getPublicEvents(), because that
+   * creates a new array on every
+   * getSnapshot() call.
+   */
+  cachedPublicEvents =
+    cachedOrganizerEvents.filter(
+      (event) =>
+        event.status ===
+        "published"
+    );
+
+  organizerEventsCacheInitialized =
+    true;
+}
+
+/* =========================================================
+   GET ORGANIZER EVENTS
+========================================================= */
+
+export function getOrganizerEvents(): Event[] {
+  if (
+    !organizerEventsCacheInitialized
+  ) {
+    refreshOrganizerEventsCache();
+  }
+
+  return cachedOrganizerEvents;
+}
+
+/* =========================================================
+   GET PUBLIC EVENTS
+========================================================= */
+
+/**
+ * Returns only events that have been approved
+ * and published.
+ *
+ * Used by the public Discover Events page.
+ *
+ * IMPORTANT:
+ * This function MUST return the cached
+ * array reference. Do not use .filter()
+ * directly here.
+ */
+export function getPublicEvents(): Event[] {
+  if (
+    !organizerEventsCacheInitialized
+  ) {
+    refreshOrganizerEventsCache();
+  }
+
+  return cachedPublicEvents;
+}
+
+/* =========================================================
+   DELETE ORGANIZER EVENT
+========================================================= */
+
+export function deleteOrganizerEvent(
+  eventId: string
+): boolean {
+  if (!eventId) {
+    return false;
+  }
+
+  const drafts =
+    getDraftSnapshot();
+
+  const exists =
+    drafts.some(
+      (draft) =>
+        draft.id === eventId
+    );
+
+  if (!exists) {
+    return false;
+  }
+
+  writeDrafts(
+    drafts.filter(
+      (draft) =>
+        draft.id !== eventId
+    )
+  );
+
+  return true;
+}
+
+/* =========================================================
+   UPDATE ORGANIZER EVENT STATUS
+========================================================= */
+
+export function updateOrganizerEventStatus(
+  eventId: string,
+  status: EventStatus
+): Event | null {
+  if (!eventId) {
+    return null;
+  }
+
+  if (!isEventStatus(status)) {
+    return null;
+  }
+
+  const drafts =
+    getDraftSnapshot();
+
+  const index =
+    drafts.findIndex(
+      (draft) =>
+        draft.id === eventId
+    );
+
+  if (index === -1) {
+    return null;
+  }
+
+  const updated =
+    normalizeDraft({
+      ...drafts[index],
+
+      status,
+
+      updatedAt:
+        now(),
+    });
+
+  const nextDrafts =
+    [...drafts];
+
+  nextDrafts[index] =
+    updated;
+
+  writeDrafts(
+    nextDrafts
+  );
+
+  try {
+    return convertDraftToEvent(
+      updated
+    );
+  } catch {
+    return null;
+  }
+}
+
+/* =========================================================
+   PUBLISH EVENT
+========================================================= */
+
+export function publishEventDraft(
+  eventId: string
+): Event | null {
+  return updateOrganizerEventStatus(
+    eventId,
+    "published"
   );
 }
 
 /* =========================================================
-   REFRESH STORE
+   SUBMIT EVENT FOR REVIEW
 ========================================================= */
 
-export function refreshEventDraftStore(): void {
-  if (!isBrowser()) {
-    return;
+export function submitEventForReview(
+  eventId: string
+): EventDraft {
+  const draft =
+    getEventDraft(
+      eventId
+    );
+
+  if (!draft) {
+    throw new Error(
+      "Event draft could not be found."
+    );
   }
 
-  initialized = false;
+  return saveEventDraft({
+    id: eventId,
 
-  initialize();
+    status:
+      "pending-review",
 
-  notify();
+    currentStep:
+      "review",
+  });
+}
+
+/* =========================================================
+   INITIAL CLIENT CACHE
+========================================================= */
+
+if (canUseStorage()) {
+  refreshDraftCache();
+
+  refreshOrganizerEventsCache();
+}
+
+/* =========================================================
+   APPROVE ORGANIZER EVENT
+========================================================= */
+
+export function approveOrganizerEvent(
+  eventId: string
+): Event | null {
+  if (!eventId) {
+    return null;
+  }
+
+  return updateOrganizerEventStatus(
+    eventId,
+    "published"
+  );
+}
+
+/* =========================================================
+   REJECT ORGANIZER EVENT
+========================================================= */
+
+export function rejectOrganizerEvent(
+  eventId: string
+): Event | null {
+  if (!eventId) {
+    return null;
+  }
+
+  return updateOrganizerEventStatus(
+    eventId,
+    "rejected"
+  );
 }

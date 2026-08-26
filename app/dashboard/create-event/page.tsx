@@ -18,6 +18,7 @@ import {
 } from "react";
 
 import {
+  createEventDraft,
   getEventDraft,
   saveEventDraft,
   subscribeToEventDrafts,
@@ -68,261 +69,216 @@ const categories: {
 ];
 
 /* =========================================================
-   SERVER SNAPSHOT
+   TYPES
+========================================================= */
+
+interface CreateEventFormProps {
+  draft: EventDraft | null;
+}
+
+interface FormErrors {
+  title?: string;
+  description?: string;
+  category?: string;
+  image?: string;
+  general?: string;
+}
+
+/* =========================================================
+   SSR HELPERS
 ========================================================= */
 
 const EMPTY_DRAFT: EventDraft | null = null;
 
-function serverDraftSnapshot(): EventDraft | null {
-  return EMPTY_DRAFT;
+function subscribeReady(
+  callback: () => void
+): () => void {
+  void callback;
+
+  return () => {};
+}
+
+function getClientReady(): boolean {
+  return true;
+}
+
+function getServerReady(): boolean {
+  return false;
 }
 
 /* =========================================================
-   CREATE EMPTY DRAFT DATA
+   CREATE EVENT FORM
 ========================================================= */
 
-function createEmptyDraftData(): EventDraft {
-  const timestamp = new Date().toISOString();
-
-  return {
-    id: "",
-    slug: "",
-    title: "",
-    description: "",
-    image: undefined,
-    organizerImage: undefined,
-
-    category: "community",
-
-    date: "",
-    time: "",
-    startTime: "",
-    endTime: "",
-
-    location: "",
-    venue: "",
-    address: "",
-
-    latitude: undefined,
-    longitude: undefined,
-
-    organizer: {
-      id: "current-organizer",
-      name: "Organizer",
-      image: "",
-    },
-
-    organizerId: "",
-    organizerEmail: "",
-
-    tickets: [],
-
-    status: "draft",
-
-    rejectionReason: undefined,
-
-    createdAt: timestamp,
-    updatedAt: timestamp,
-
-    submittedAt: undefined,
-    publishedAt: undefined,
-    endedAt: undefined,
-    cancelledAt: undefined,
-  };
-}
-
-/* =========================================================
-   MERGE DRAFT
-========================================================= */
-
-function createDraftFromExisting(
-  draft: EventDraft | null
-): EventDraft {
-  if (draft) {
-    return {
-      ...createEmptyDraftData(),
-      ...draft,
-
-      organizer:
-        draft.organizer ??
-        {
-          id:
-            draft.organizerId ||
-            "current-organizer",
-          name: "Organizer",
-          image:
-            draft.organizerImage || "",
-        },
-
-      tickets:
-        Array.isArray(draft.tickets)
-          ? draft.tickets
-          : [],
-    };
-  }
-
-  return createEmptyDraftData();
-}
-
-/* =========================================================
-   COMPONENT
-========================================================= */
-
-export default function CreateEventPage() {
+function CreateEventForm({
+  draft,
+}: CreateEventFormProps) {
   const router = useRouter();
-
-  const searchParams =
-    useSearchParams();
-
-  const draftId =
-    searchParams.get("draftId");
-
-  /* =======================================================
-     LOAD DRAFT FROM EXTERNAL STORE
-  ======================================================= */
-
-  const draft =
-    useSyncExternalStore(
-      subscribeToEventDrafts,
-
-      () =>
-        draftId
-          ? getEventDraft(draftId)
-          : null,
-
-      serverDraftSnapshot
-    );
 
   /* =======================================================
      FORM STATE
-
-     We intentionally do NOT use useEffect here.
-     This prevents the React 19 cascading setState error.
   ======================================================= */
 
-  const [title, setTitle] =
-    useState("");
+  const [title, setTitle] = useState<string>(
+    draft?.title ?? ""
+  );
 
-  const [
-    description,
-    setDescription,
-  ] = useState("");
-
-  const [
-    category,
-    setCategory,
-  ] = useState<EventCategory | "">("");
-
-  const [image, setImage] =
-    useState("");
-
-  const [
-    initializedDraftId,
-    setInitializedDraftId,
-  ] = useState<string | null>(null);
-
-  /*
-   * Initialize the form when the draft becomes available.
-   *
-   * This is deliberately guarded so it only happens once
-   * for a specific draft.
-   */
-  if (
-    draft &&
-    initializedDraftId !== draft.id
-  ) {
-    setInitializedDraftId(draft.id);
-
-    setTitle(draft.title || "");
-
-    setDescription(
-      draft.description || ""
+  const [description, setDescription] =
+    useState<string>(
+      draft?.description ?? ""
     );
 
-    setCategory(
-      draft.category || ""
+  const [category, setCategory] =
+    useState<EventCategory | "">(
+      draft?.category ?? ""
     );
 
-    setImage(draft.image || "");
-  }
-
-  /* =======================================================
-     ERRORS
-  ======================================================= */
+  const [image, setImage] = useState<string>(
+    draft?.image ?? ""
+  );
 
   const [errors, setErrors] =
-    useState<{
-      title?: string;
-      description?: string;
-      category?: string;
-      image?: string;
-    }>({});
+    useState<FormErrors>({});
 
   const [saving, setSaving] =
     useState(false);
 
   /* =======================================================
-     SAVE EVENT
+     CLEAR ERROR
   ======================================================= */
 
-  const buildEvent = (): EventDraft => {
-    const baseDraft =
-      createDraftFromExisting(draft);
+  const clearError = (
+    field: keyof FormErrors
+  ) => {
+    setErrors((current) => ({
+      ...current,
+      [field]: undefined,
+      general: undefined,
+    }));
+  };
 
-    return {
-      ...baseDraft,
+  /* =======================================================
+     SAVE FORM
+  ======================================================= */
+
+  const saveCurrentForm = (
+    nextStep: "details" | "location"
+  ): EventDraft => {
+    const cleanTitle = title.trim();
+
+    const cleanDescription =
+      description.trim();
+
+    /*
+     * This should only be called after
+     * validation when continuing.
+     *
+     * For drafts, we still allow an empty
+     * category and title.
+     */
+    const selectedCategory =
+      category || draft?.category;
+
+    /* =====================================================
+       UPDATE EXISTING DRAFT
+    ===================================================== */
+
+    if (draft?.id) {
+      return saveEventDraft({
+        id: draft.id,
+
+        title: cleanTitle,
+
+        description: cleanDescription,
+
+        ...(selectedCategory
+          ? {
+              category:
+                selectedCategory,
+            }
+          : {}),
+
+        ...(image
+          ? {
+              image,
+            }
+          : {}),
+
+        /*
+         * Do NOT replace the existing
+         * organizer information.
+         *
+         * eventDraft.ts will preserve
+         * existing fields that are not
+         * included here.
+         */
+
+        currentStep: nextStep,
+
+        status:
+          draft.status === "published"
+            ? "published"
+            : "draft",
+      });
+    }
+
+    /* =====================================================
+       CREATE NEW DRAFT
+    ===================================================== */
+
+    return createEventDraft({
+      title: cleanTitle,
+
+      description: cleanDescription,
+
+      ...(selectedCategory
+        ? {
+            category:
+              selectedCategory,
+          }
+        : {}),
+
+      ...(image
+        ? {
+            image,
+          }
+        : {}),
+
+      tickets: [],
 
       /*
-       * Keep existing ID when editing.
-       * Create a temporary ID when creating a new event.
+       * IMPORTANT:
+       *
+       * Do not use:
+       *
+       * ticketType: ""
+       *
+       * because TicketType does not
+       * accept an empty string.
        */
-      id:
-        baseDraft.id ||
-        `event-${Date.now()}`,
 
-      slug:
-        baseDraft.slug ||
-        createSlug(
-          title.trim() ||
-            "untitled-event"
-        ),
-
-      title: title.trim(),
-
-      description:
-        description.trim(),
-
-      category:
-        category ||
-        "community",
-
-      image:
-        image || undefined,
+      currentStep: nextStep,
 
       status: "draft",
-
-      updatedAt:
-        new Date().toISOString(),
-    };
+    });
   };
 
   /* =======================================================
      SAVE DRAFT
   ======================================================= */
 
-  const saveDraft = () => {
+  const handleSaveDraft = () => {
     if (saving) {
       return;
     }
 
+    setErrors({});
+
     setSaving(true);
 
     try {
-      const event =
-        buildEvent();
-
       const saved =
-        saveEventDraft(event);
+        saveCurrentForm("details");
 
       router.push(
         `/dashboard/events?draftSaved=${encodeURIComponent(
@@ -331,16 +287,20 @@ export default function CreateEventPage() {
       );
     } catch (error) {
       console.error(
-        "TEEKET: Failed to save draft.",
+        "TEEKET: Failed to save event draft.",
         error
       );
+
+      setErrors({
+        general:
+          "Unable to save this draft. Please try again.",
+      });
 
       setSaving(false);
     }
   };
-
   /* =======================================================
-     IMAGE
+     IMAGE UPLOAD
   ======================================================= */
 
   const handleImage = (
@@ -353,6 +313,12 @@ export default function CreateEventPage() {
       return;
     }
 
+    clearError("image");
+
+    /* -----------------------------------------------------
+       FILE TYPE
+    ----------------------------------------------------- */
+
     if (
       !file.type.startsWith("image/")
     ) {
@@ -362,52 +328,270 @@ export default function CreateEventPage() {
           "Please select a valid image.",
       }));
 
+      event.target.value = "";
+
       return;
     }
 
-    /*
-     * Keep uploads below the storage limit.
-     *
-     * Your eventDraft store already protects
-     * localStorage, but 1MB is safer than 5MB
-     * for a localStorage-backed MVP.
-     */
+    /* -----------------------------------------------------
+       FILE SIZE
+    ----------------------------------------------------- */
+
     if (
       file.size >
-      1024 * 1024
+      5 * 1024 * 1024
     ) {
       setErrors((current) => ({
         ...current,
         image:
-          "Image must be less than 1MB.",
+          "Image must be less than 5MB.",
       }));
+
+      event.target.value = "";
 
       return;
     }
+
+    /* -----------------------------------------------------
+       READ FILE
+    ----------------------------------------------------- */
 
     const reader =
       new FileReader();
 
     reader.onload = () => {
-      setImage(
-        String(reader.result)
-      );
+      const result =
+        typeof reader.result ===
+        "string"
+          ? reader.result
+          : "";
 
-      setErrors((current) => ({
-        ...current,
-        image: undefined,
-      }));
+      if (!result) {
+        setErrors((current) => ({
+          ...current,
+          image:
+            "Unable to read the selected image.",
+        }));
+
+        return;
+      }
+
+      /* ---------------------------------------------------
+         COMPRESS IMAGE BEFORE STORAGE
+      --------------------------------------------------- */
+
+      const img =
+        new Image();
+
+      img.onload = () => {
+        const maxWidth = 1600;
+        const maxHeight = 1200;
+
+        let width =
+          img.width;
+
+        let height =
+          img.height;
+
+        if (
+          width >
+            maxWidth ||
+          height >
+            maxHeight
+        ) {
+          const widthRatio =
+            maxWidth /
+            width;
+
+          const heightRatio =
+            maxHeight /
+            height;
+
+          const ratio =
+            Math.min(
+              widthRatio,
+              heightRatio
+            );
+
+          width =
+            Math.round(
+              width * ratio
+            );
+
+          height =
+            Math.round(
+              height * ratio
+            );
+        }
+
+        const canvas =
+          document.createElement(
+            "canvas"
+          );
+
+        canvas.width =
+          width;
+
+        canvas.height =
+          height;
+
+        const context =
+          canvas.getContext(
+            "2d"
+          );
+
+        if (!context) {
+          setErrors((current) => ({
+            ...current,
+            image:
+              "Unable to process the selected image.",
+          }));
+
+          return;
+        }
+
+        context.drawImage(
+          img,
+          0,
+          0,
+          width,
+          height
+        );
+
+        const compressedImage =
+          canvas.toDataURL(
+            "image/jpeg",
+            0.75
+          );
+
+        setImage(
+          compressedImage
+        );
+
+        clearError("image");
+      };
+
+      img.onerror = () => {
+        setErrors((current) => ({
+          ...current,
+          image:
+            "Unable to process the selected image.",
+        }));
+      };
+
+      img.src = result;
     };
 
     reader.onerror = () => {
       setErrors((current) => ({
         ...current,
         image:
-          "Unable to read this image.",
+          "Unable to read the selected image.",
       }));
     };
 
     reader.readAsDataURL(file);
+  };
+
+  /* =======================================================
+     CATEGORY
+  ======================================================= */
+
+  const handleCategoryChange = (
+    value: string
+  ) => {
+    if (!value) {
+      setCategory("");
+
+      clearError("category");
+
+      return;
+    }
+
+    const selected =
+      categories.find(
+        (item) =>
+          item.value === value
+      );
+
+    if (!selected) {
+      return;
+    }
+
+    setCategory(
+      selected.value
+    );
+
+    clearError("category");
+  };
+
+  /* =======================================================
+     CONTINUE VALIDATION
+  ======================================================= */
+
+  const validateForm = (): boolean => {
+    const nextErrors:
+      FormErrors = {};
+
+    const cleanTitle =
+      title.trim();
+
+    const cleanDescription =
+      description.trim();
+
+    /* -----------------------------------------------------
+       TITLE
+    ----------------------------------------------------- */
+
+    if (!cleanTitle) {
+      nextErrors.title =
+        "Event title is required.";
+    } else if (
+      cleanTitle.length < 3
+    ) {
+      nextErrors.title =
+        "Event title must be at least 3 characters.";
+    }
+
+    /* -----------------------------------------------------
+       DESCRIPTION
+    ----------------------------------------------------- */
+
+    if (!cleanDescription) {
+      nextErrors.description =
+        "Event description is required.";
+    } else if (
+      cleanDescription.length <
+      10
+    ) {
+      nextErrors.description =
+        "Please provide a little more information about your event.";
+    }
+
+    /* -----------------------------------------------------
+       CATEGORY
+    ----------------------------------------------------- */
+
+    if (!category) {
+      nextErrors.category =
+        "Please select an event category.";
+    }
+
+    /* -----------------------------------------------------
+       IMAGE
+    ----------------------------------------------------- */
+
+    if (!image) {
+      nextErrors.image =
+        "Event image is required.";
+    }
+
+    setErrors(nextErrors);
+
+    return (
+      Object.keys(nextErrors)
+        .length === 0
+    );
   };
 
   /* =======================================================
@@ -419,66 +603,19 @@ export default function CreateEventPage() {
       return;
     }
 
-    const nextErrors: {
-      title?: string;
-      description?: string;
-      category?: string;
-      image?: string;
-    } = {};
-
-    if (!title.trim()) {
-      nextErrors.title =
-        "Event title is required.";
-    }
-
-    if (!description.trim()) {
-      nextErrors.description =
-        "Event description is required.";
-    }
-
-    if (!category) {
-      nextErrors.category =
-        "Please select an event category.";
-    }
-
-    if (!image) {
-      nextErrors.image =
-        "Event image is required.";
-    }
-
-    setErrors(nextErrors);
-
-    if (
-      Object.keys(nextErrors)
-        .length > 0
-    ) {
+    if (!validateForm()) {
       return;
     }
 
     setSaving(true);
 
     try {
-      const event =
-        buildEvent();
-
-      const saved =
-        saveEventDraft({
-          ...event,
-
-          currentStep: "location",
-        } as EventDraft);
-
       /*
-       * IMPORTANT:
-       *
-       * Your actual route must exist:
-       *
-       * app/dashboard/create-event/location/page.tsx
-       *
-       * NOT:
-       *
-       * app/dashboard/organizer/create-event/location/
+       * Save the current details and
+       * move the SAME draft to location.
        */
+      const saved =
+        saveCurrentForm("location");
 
       router.push(
         `/dashboard/create-event/location?draftId=${encodeURIComponent(
@@ -491,37 +628,46 @@ export default function CreateEventPage() {
         error
       );
 
+      setErrors({
+        general:
+          "Unable to continue event creation. Please try again.",
+      });
+
       setSaving(false);
     }
   };
 
   /* =======================================================
-     UI
+     RENDER
   ======================================================= */
 
   return (
     <main className="min-h-screen bg-[#FAFAFA] px-4 py-8 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-5xl">
 
-        {/* HEADER */}
+        {/* =================================================
+            HEADER
+        ================================================= */}
 
         <div>
           <h1 className="text-2xl font-bold text-[#241507] sm:text-3xl">
             Create Event
           </h1>
 
-          <p className="mt-2 text-sm text-gray-500 sm:text-base">
+          <p className="mt-2 text-gray-500">
             Start by telling attendees
             about your event.
           </p>
         </div>
 
-        {/* FORM */}
+        {/* =================================================
+            FORM
+        ================================================= */}
 
         <section className="mt-8 rounded-2xl border border-gray-200 bg-white p-5 sm:p-8">
 
           {/* =================================================
-              EVENT IMAGE
+              IMAGE
           ================================================= */}
 
           <div>
@@ -534,33 +680,26 @@ export default function CreateEventPage() {
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 onChange={handleImage}
-                disabled={saving}
                 className="hidden"
               />
 
               {image ? (
-                <div className="relative overflow-hidden rounded-2xl border border-gray-200">
+                <div className="group relative overflow-hidden rounded-2xl border border-gray-200">
                   <img
                     src={image}
-                    alt={
-                      title ||
-                      "Event preview"
-                    }
+                    alt="Event preview"
                     className="h-56 w-full object-cover sm:h-72"
                   />
 
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition hover:opacity-100">
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
                     <div className="flex items-center gap-2 rounded-xl bg-white px-4 py-3 font-medium text-[#432616]">
-                      <Upload
-                        size={18}
-                      />
-
+                      <Upload size={18} />
                       Change image
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 text-center transition hover:border-[#432616]">
+                <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 text-center transition hover:border-[#432616]">
                   <ImagePlus
                     size={38}
                     className="text-gray-400"
@@ -571,8 +710,7 @@ export default function CreateEventPage() {
                   </p>
 
                   <p className="mt-1 text-sm text-gray-500">
-                    PNG, JPG or WEBP · Max
-                    1MB
+                    PNG, JPG or WEBP · Max 5MB
                   </p>
                 </div>
               )}
@@ -599,31 +737,37 @@ export default function CreateEventPage() {
 
             <input
               id="event-title"
+              type="text"
               value={title}
+              maxLength={120}
               onChange={(event) => {
                 setTitle(
                   event.target.value
                 );
 
-                setErrors((current) => ({
-                  ...current,
-                  title: undefined,
-                }));
+                clearError("title");
               }}
               placeholder="e.g. Afrofusion 2026"
-              disabled={saving}
-              className={`h-14 w-full rounded-xl border bg-white px-4 outline-none transition ${
+              className={`h-14 w-full rounded-xl border px-4 outline-none transition ${
                 errors.title
-                  ? "border-red-400"
+                  ? "border-red-400 focus:border-red-500"
                   : "border-gray-300 focus:border-[#432616]"
-              } disabled:bg-gray-50`}
+              }`}
             />
 
-            {errors.title && (
-              <p className="mt-2 text-sm text-red-600">
-                {errors.title}
-              </p>
-            )}
+            <div className="mt-1 flex justify-between">
+              {errors.title ? (
+                <p className="text-sm text-red-600">
+                  {errors.title}
+                </p>
+              ) : (
+                <span />
+              )}
+
+              <span className="text-xs text-gray-400">
+                {title.length}/120
+              </span>
+            </div>
           </div>
 
           {/* =================================================
@@ -641,32 +785,38 @@ export default function CreateEventPage() {
             <textarea
               id="event-description"
               value={description}
+              maxLength={2000}
               onChange={(event) => {
                 setDescription(
                   event.target.value
                 );
 
-                setErrors((current) => ({
-                  ...current,
-                  description:
-                    undefined,
-                }));
+                clearError(
+                  "description"
+                );
               }}
               rows={6}
               placeholder="Tell people what your event is about..."
-              disabled={saving}
-              className={`w-full resize-none rounded-xl border bg-white px-4 py-4 outline-none transition ${
+              className={`w-full resize-none rounded-xl border px-4 py-4 outline-none transition ${
                 errors.description
-                  ? "border-red-400"
+                  ? "border-red-400 focus:border-red-500"
                   : "border-gray-300 focus:border-[#432616]"
-              } disabled:bg-gray-50`}
+              }`}
             />
 
-            {errors.description && (
-              <p className="mt-2 text-sm text-red-600">
-                {errors.description}
-              </p>
-            )}
+            <div className="mt-1 flex justify-between">
+              {errors.description ? (
+                <p className="text-sm text-red-600">
+                  {errors.description}
+                </p>
+              ) : (
+                <span />
+              )}
+
+              <span className="text-xs text-gray-400">
+                {description.length}/2000
+              </span>
+            </div>
           </div>
 
           {/* =================================================
@@ -684,23 +834,16 @@ export default function CreateEventPage() {
             <select
               id="event-category"
               value={category}
-              onChange={(event) => {
-                setCategory(
-                  event.target
-                    .value as EventCategory
-                );
-
-                setErrors((current) => ({
-                  ...current,
-                  category: undefined,
-                }));
-              }}
-              disabled={saving}
+              onChange={(event) =>
+                handleCategoryChange(
+                  event.target.value
+                )
+              }
               className={`h-14 w-full rounded-xl border bg-white px-4 outline-none transition ${
                 errors.category
-                  ? "border-red-400"
+                  ? "border-red-400 focus:border-red-500"
                   : "border-gray-300 focus:border-[#432616]"
-              } disabled:bg-gray-50`}
+              }`}
             >
               <option value="">
                 Select category
@@ -726,14 +869,28 @@ export default function CreateEventPage() {
           </div>
 
           {/* =================================================
-              BUTTONS
+              GENERAL ERROR
           ================================================= */}
 
-          <div className="mt-8 flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:justify-between">
+          {errors.general && (
+            <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-sm font-medium text-red-600">
+                {errors.general}
+              </p>
+            </div>
+          )}
+
+          {/* =================================================
+              ACTIONS
+          ================================================= */}
+
+          <div className="mt-8 flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:items-center sm:justify-between">
 
             <button
               type="button"
-              onClick={saveDraft}
+              onClick={
+                handleSaveDraft
+              }
               disabled={saving}
               className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-[#432616] bg-white px-6 font-semibold text-[#432616] transition hover:bg-[#432616]/5 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -746,7 +903,9 @@ export default function CreateEventPage() {
 
             <button
               type="button"
-              onClick={handleContinue}
+              onClick={
+                handleContinue
+              }
               disabled={saving}
               className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#432616] px-7 font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -760,7 +919,6 @@ export default function CreateEventPage() {
                 />
               )}
             </button>
-
           </div>
         </section>
       </div>
@@ -769,31 +927,97 @@ export default function CreateEventPage() {
 }
 
 /* =========================================================
-   SLUG
+   PAGE
 ========================================================= */
 
-function createSlug(
-  title: string
-): string {
-  const slug =
-    title
-      .toLowerCase()
-      .trim()
-      .replace(
-        /[^a-z0-9\s-]/g,
-        ""
-      )
-      .replace(
-        /\s+/g,
-        "-"
-      )
-      .replace(
-        /-+/g,
-        "-"
-      );
+export default function CreateEventPage() {
+  const searchParams =
+    useSearchParams();
+
+  const draftId =
+    searchParams.get(
+      "draftId"
+    );
+
+  const ready =
+    useSyncExternalStore(
+      subscribeReady,
+      getClientReady,
+      getServerReady
+    );
+
+  const draft =
+    useSyncExternalStore(
+      subscribeToEventDrafts,
+      () =>
+        draftId
+          ? getEventDraft(
+              draftId
+            )
+          : EMPTY_DRAFT,
+      () => EMPTY_DRAFT
+    );
+
+  /* =======================================================
+     LOADING
+  ======================================================= */
+
+  if (!ready) {
+    return (
+      <main className="min-h-screen bg-[#FAFAFA] px-4 py-8 sm:px-6 lg:px-10">
+        <div className="mx-auto max-w-5xl animate-pulse">
+          <div className="h-8 w-48 rounded bg-gray-200" />
+
+          <div className="mt-3 h-5 w-72 rounded bg-gray-200" />
+
+          <div className="mt-8 h-[650px] rounded-2xl bg-gray-200" />
+        </div>
+      </main>
+    );
+  }
+
+  /* =======================================================
+     DRAFT NOT FOUND
+  ======================================================= */
+
+  if (draftId && !draft) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#FAFAFA] px-4">
+        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center">
+          <h1 className="text-xl font-bold text-[#241507]">
+            Draft not found
+          </h1>
+
+          <p className="mt-2 text-sm leading-6 text-gray-500">
+            This event draft could not
+            be found. It may have been
+            deleted from your browser
+            storage.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href =
+                "/dashboard/create-event";
+            }}
+            className="mt-6 inline-flex h-11 items-center justify-center rounded-xl bg-[#432616] px-6 font-semibold text-white"
+          >
+            Create New Event
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    slug ||
-    `event-${Date.now()}`
+    <CreateEventForm
+      key={
+        draft
+          ? `${draft.id}-${draft.updatedAt ?? ""}`
+          : "new-event"
+      }
+      draft={draft}
+    />
   );
 }
